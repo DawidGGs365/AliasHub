@@ -25,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.unit.dp
 import com.dawidggs.aliashub.data.Alias
@@ -32,6 +33,7 @@ import com.dawidggs.aliashub.data.CreateOptions
 import com.dawidggs.aliashub.data.CreateRequest
 import com.dawidggs.aliashub.data.ProviderType
 import androidx.compose.ui.tooling.preview.Preview
+import com.dawidggs.aliashub.R
 
 @Composable
 fun CreateAliasDialog(
@@ -68,14 +70,14 @@ fun CreateAliasDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("New alias") },
+        title = { Text(stringResource(R.string.new_alias)) },
         text = {
             Column(
                 modifier = Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 if (providers.size > 1) {
-                    SectionLabel("Provider")
+                    SectionLabel(stringResource(R.string.provider))
                     providers.forEach { type ->
                         RadioRow(type.label, type == selected) { selected = type }
                     }
@@ -84,20 +86,27 @@ fun CreateAliasDialog(
                     CircularProgressIndicator(Modifier.size(24.dp))
                 } else {
                     if (domains.size > 1) {
-                        SectionLabel("Domain")
+                        SectionLabel(stringResource(R.string.domain))
                         domains.forEach { d -> RadioRow(d.label, d.id == domainId) { domainId = d.id } }
                     }
                     if (chosen?.needsPrefix == true) {
                         OutlinedTextField(
                             value = prefix,
                             onValueChange = { prefix = it },
-                            label = { Text(if (chosen.prefixRequired) "Name" else "Name (optional)") },
+                            label = { Text(if (chosen.prefixRequired) stringResource(R.string.name) else stringResource(
+                                R.string.name_optional
+                            )) },
                             supportingText = {
                                 Text(
                                     if (chosen.prefixRequired && prefix.isBlank()) {
-                                        "This domain needs a name of your choosing."
+                                        stringResource(R.string.custom_name_required_text)
                                     } else {
-                                        "Result: ${prefix.trim().ifEmpty { "random" }}${chosen.joiner}${chosen.label}"
+                                        stringResource(
+                                            R.string.alias_creator_result,
+                                            prefix.trim().ifEmpty { stringResource(R.string.random) },
+                                            chosen.joiner,
+                                            chosen.label
+                                        )
                                     },
                                 )
                             },
@@ -109,8 +118,8 @@ fun CreateAliasDialog(
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
-                    label = { Text("Note (optional)") },
-                    placeholder = { Text("Where will you use it?") },
+                    label = { Text(stringResource(R.string.note)) },
+                    placeholder = { Text(stringResource(R.string.note_placeholder)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
                 options?.warning?.let {
@@ -134,9 +143,9 @@ fun CreateAliasDialog(
                     val name = if (chosen?.needsPrefix == true) prefix.trim() else ""
                     onCreate(selected, CreateRequest(note.trim(), domainId, name))
                 },
-            ) { Text("Create") }
+            ) { Text(stringResource(R.string.create_button)) }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_button)) } },
     )
 }
 
@@ -164,20 +173,20 @@ fun NoteDialog(alias: Alias, onDismiss: () -> Unit, onSave: (String) -> Unit) {
     var note by remember { mutableStateOf(alias.note) }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Edit note") },
+        title = { Text(stringResource(R.string.edit_note)) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(alias.address)
                 OutlinedTextField(
                     value = note,
                     onValueChange = { note = it },
-                    label = { Text("Note") },
+                    label = { Text(stringResource(R.string.note)) },
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
         },
-        confirmButton = { TextButton(onClick = { onSave(note.trim()) }) { Text("Save") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        confirmButton = { TextButton(onClick = { onSave(note.trim()) }) { Text(stringResource(R.string.save_button)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_button)) } },
     )
 }
 
@@ -185,9 +194,9 @@ fun NoteDialog(alias: Alias, onDismiss: () -> Unit, onSave: (String) -> Unit) {
 fun ConfirmDeleteDialog(alias: Alias, onDismiss: () -> Unit, onConfirm: () -> Unit) {
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Delete alias?") },
-        text = { Text("${alias.address} will stop receiving mail. This can't be undone from here.") },
-        confirmButton = { TextButton(onClick = onConfirm) { Text("Delete") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } },
+        title = { Text(stringResource(R.string.delete_alias_confirmation)) },
+        text = { Text(stringResource(R.string.delete_alias_warning_text, alias.address)) },
+        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.delete_button)) } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_button)) } },
     )
 }

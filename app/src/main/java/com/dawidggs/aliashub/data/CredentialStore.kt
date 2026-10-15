@@ -39,5 +39,6 @@ class CredentialStore(context: Context) {
             .apply()
     }
 
-    fun configuredTypes(): List<ProviderType> = ProviderType.entries.filter { get(it) != null }
+    /** Cheap: checks for the key without decrypting any token. */
+    fun configuredTypes(): List<ProviderType> = ProviderType.entries.filter { prefs.contains("${it.name}.token") }
 }

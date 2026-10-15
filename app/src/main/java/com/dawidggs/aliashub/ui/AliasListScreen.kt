@@ -53,21 +53,25 @@ import com.dawidggs.aliashub.AliasViewModel
 import com.dawidggs.aliashub.UiState
 import com.dawidggs.aliashub.data.Alias
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.ui.tooling.preview.Preview
+import com.dawidggs.aliashub.R
+import androidx.compose.ui.res.stringResource
 
 @Composable
 fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Unit) {
     val context = LocalContext.current
     val snackbar = remember { SnackbarHostState() }
+    val copy = stringResource(R.string.copy)
     var showCreate by remember { mutableStateOf(false) }
     var noteFor by remember { mutableStateOf<Alias?>(null) }
     var deleteFor by remember { mutableStateOf<Alias?>(null) }
+    // Filtering runs once per change of inputs, not on every recomposition (and not twice).
+    val visible = remember(state.aliases, state.filter, state.query) { state.visible }
 
     LaunchedEffect(Unit) {
         vm.messages.collect { msg ->
             val result = snackbar.showSnackbar(
                 message = msg.text,
-                actionLabel = if (msg.copyText != null) "Copy" else null,
+                actionLabel = if (msg.copyText != null) copy else null,
                 withDismissAction = true,
             )
             if (result == SnackbarResult.ActionPerformed && msg.copyText != null) {
@@ -79,20 +83,20 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("AliasHub") },
+                title = { Text(stringResource(R.string.app_name)) },
                 actions = {
                     IconButton(onClick = { vm.refresh() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = "Refresh")
+                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh_button))
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = "Providers")
+                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.providers))
                     }
                 },
             )
         },
         floatingActionButton = {
             FloatingActionButton(onClick = { showCreate = true }) {
-                Icon(Icons.Default.Add, contentDescription = "New alias")
+                Icon(Icons.Default.Add, contentDescription = stringResource(R.string.new_alias))
             }
         },
         snackbarHost = { SnackbarHost(snackbar) },
@@ -102,7 +106,7 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
                 value = state.query,
                 onValueChange = vm::setQuery,
                 singleLine = true,
-                placeholder = { Text("Search addresses and notes") },
+                placeholder = { Text(stringResource(R.string.searchbar_text)) },
                 leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -116,7 +120,7 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
                     FilterChip(
                         selected = state.filter == null,
                         onClick = { vm.setFilter(null) },
-                        label = { Text("All") },
+                        label = { Text(stringResource(R.string.section_all)) },
                     )
                 }
                 items(state.configured) { type ->
@@ -140,17 +144,17 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
                     contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 88.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                 ) {
-                    if (state.visible.isEmpty() && !state.loading) {
+                    if (visible.isEmpty() && !state.loading) {
                         item {
                             Text(
-                                text = if (state.aliases.isEmpty()) "No aliases yet. Tap + to create one."
-                                else "Nothing matches your search.",
+                                text = if (state.aliases.isEmpty()) stringResource(R.string.empty_vault_text)
+                                else stringResource(R.string.empty_search_result),
                                 style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.padding(vertical = 24.dp),
                             )
                         }
                     }
-                    items(state.visible, key = { it.key }) { alias ->
+                    items(visible, key = { it.key }) { alias ->
                         AliasCard(
                             alias = alias,
                             busy = alias.key in state.busy,
@@ -249,7 +253,12 @@ private fun AliasCard(
                     )
                 }
                 Text(
-                    "${alias.provider.label} · ${alias.forwarded} forwarded · ${alias.blocked} blocked",
+                    stringResource(
+                        R.string.alias_info,
+                        alias.provider.label,
+                        alias.forwarded,
+                        alias.blocked
+                    ),
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -257,7 +266,7 @@ private fun AliasCard(
             Switch(checked = alias.enabled, onCheckedChange = { onToggle() }, enabled = !busy)
             Box {
                 IconButton(onClick = { menu = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More actions")
+                    Icon(Icons.Default.MoreVert, contentDescription = stringResource(R.string.more_actions_button))
                 }
                 DropdownMenu(
                     expanded = menu,
@@ -267,15 +276,15 @@ private fun AliasCard(
                     tonalElevation = 2.dp,
                     shadowElevation = 8.dp,) {
                     DropdownMenuItem(
-                        text = { Text("Copy address") },
+                        text = { Text(stringResource(R.string.copy)) },
                         onClick = { menu = false; onCopy() },
                     )
                     DropdownMenuItem(
-                        text = { Text("Edit note") },
+                        text = { Text(stringResource(R.string.edit_note)) },
                         onClick = { menu = false; onEditNote() },
                     )
                     DropdownMenuItem(
-                        text = { Text("Delete") },
+                        text = { Text(stringResource(R.string.delete_button)) },
                         onClick = { menu = false; onDelete() },
                     )
                 }

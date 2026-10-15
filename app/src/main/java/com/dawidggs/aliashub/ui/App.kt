@@ -14,6 +14,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.dawidggs.aliashub.AliasViewModel
+import com.dawidggs.aliashub.R
 
 @Composable
 fun AliasHubApp(vm: AliasViewModel = viewModel()) {
@@ -23,6 +24,9 @@ fun AliasHubApp(vm: AliasViewModel = viewModel()) {
     val close = { showSettings = false }
 
     BackHandler(enabled = showSettings && !needsSetup) { close() }
+
+    // The credential store loads off the main thread; don't flash the setup screen meanwhile.
+    if (!state.initialized) return
 
     if (needsSetup || showSettings) {
         // First run has nothing to go back to, so no close button until a provider exists.
@@ -34,9 +38,9 @@ fun AliasHubApp(vm: AliasViewModel = viewModel()) {
 
 fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-    cm.setPrimaryClip(ClipData.newPlainText("alias", text))
+    cm.setPrimaryClip(ClipData.newPlainText(context.getString(R.string.alias), text))
     // Android 13+ shows its own "copied" confirmation.
     if (Build.VERSION.SDK_INT < 33) {
-        Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, context.getString(R.string.copied), Toast.LENGTH_SHORT).show()
     }
 }

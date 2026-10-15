@@ -14,8 +14,8 @@ import com.dawidggs.aliashub.data.ProviderException.Kind
 import com.dawidggs.aliashub.data.ProviderType
 import com.dawidggs.aliashub.data.Providers
 import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.async
-import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -24,9 +24,15 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import android.content.Context
+import com.dawidggs.aliashub.data.AliasProvider
+import java.util.concurrent.ConcurrentHashMap
 
 data class UiState(
-    val configured: List<ProviderType>,
+    /** False until the credential store has been read (it is opened off the main thread). */
+    val initialized: Boolean = false,
+    val configured: List<ProviderType> = emptyList(),
     val aliases: List<Alias> = emptyList(),
     val loading: Boolean = false,
     /** One message per provider that failed, so a broken one never hides the others. */
@@ -49,17 +55,31 @@ data class UiState(
 data class Message(val text: String, val copyText: String? = null)
 
 class AliasViewModel(app: Application) : AndroidViewModel(app) {
-    private val store = CredentialStore(app)
+    private val context: Context
+        get() = getApplication()
+    // Opening the encrypted store touches the Android Keystore, which is slow. It is created
+    // lazily and first touched from an IO thread in init, so the main thread never pays for it.
+    private val store by lazy { CredentialStore(app) }
     private val cache = mutableMapOf<ProviderType, List<Alias>>()
 
-    private val _state = MutableStateFlow(UiState(configured = store.configuredTypes()))
+    /** Providers are cheap but decrypting their key is not, so build each one once per config. */
+    private val providers = ConcurrentHashMap<ProviderType, AliasProvider>()
+
+    /** In-flight list request per provider; a new refresh replaces (cancels) the old one. */
+    private val loads = mutableMapOf<ProviderType, Job>()
+
+    private val _state = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val _messages = Channel<Message>(Channel.BUFFERED)
     val messages: Flow<Message> = _messages.receiveAsFlow()
 
     init {
-        refresh()
+        viewModelScope.launch {
+            val configured = withContext(Dispatchers.IO) { store.configuredTypes() }
+            _state.update { it.copy(initialized = true, configured = configured) }
+            refresh()
+        }
     }
 
     // ---- loading ----------------------------------------------------------------------
@@ -68,17 +88,32 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     fun refresh(only: ProviderType? = null) {
         val targets = if (only != null) listOf(only) else _state.value.configured
         if (targets.isEmpty()) return
-        viewModelScope.launch {
-            _state.update { it.copy(loading = true) }
-            val results = targets.map { t -> async { t to attempt { provider(t).list() } } }.awaitAll()
-            val errors = _state.value.errors.toMutableMap()
-            for ((t, result) in results) {
-                result
-                    .onSuccess { cache[t] = it; errors.remove(t) }
-                    .onFailure { errors[t] = describe(t, it) }
+        for (t in targets) {
+            loads.remove(t)?.cancel()
+            loads[t] = viewModelScope.launch {
+                val self = coroutineContext[Job]
+                try {
+                    val result = attempt { provider(t).list() }
+                    // The provider may have been removed while the request was in flight.
+                    if (t !in _state.value.configured) return@launch
+                    result.onSuccess { cache[t] = it }
+                    _state.update { s ->
+                        s.copy(
+                            errors = result.fold(
+                                onSuccess = { s.errors - t },
+                                onFailure = { s.errors + (t to describe(t, it)) },
+                            ),
+                            aliases = merged(),
+                        )
+                    }
+                } finally {
+                    if (loads[t] === self) loads.remove(t)
+                    _state.update { it.copy(loading = loads.isNotEmpty()) }
+                }
             }
-            _state.update { it.copy(loading = false, errors = errors, aliases = merged()) }
         }
+        // After the loop: a cancelled predecessor may have already cleared the flag.
+        _state.update { it.copy(loading = loads.isNotEmpty()) }
     }
 
     // ---- provider setup -----------------------------------------------------------------
@@ -86,12 +121,13 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     /** Returns an error message to show, or null if saved. The stored key is never handed back to the UI. */
     fun saveConfig(type: ProviderType, token: String, baseUrl: String): String? {
         val key = token.trim()
-        if (key.isEmpty()) return "Paste an API key first."
+        if (key.isEmpty()) return context.getString(R.string.vm_empty_api_key_box)
         val base = baseUrl.trim().ifEmpty { null }
         if (base != null && !Http.isValidHttpsBase(base)) {
-            return "Self-hosted URL must be a valid https:// address."
+            return context.getString(R.string.vm_invalid_selfost_url)
         }
         store.save(type, ProviderConfig(token = key, baseUrl = base))
+        providers.remove(type)
         _state.update { it.copy(configured = store.configuredTypes(), errors = it.errors - type) }
         refresh(type)
         return null
@@ -99,6 +135,8 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
 
     fun removeProvider(type: ProviderType) {
         store.clear(type)
+        providers.remove(type)
+        loads.remove(type)?.cancel()
         cache.remove(type)
         _state.update {
             it.copy(
@@ -124,7 +162,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess {
                     cache[type] = listOf(it) + cache[type].orEmpty()
                     _state.update { s -> s.copy(aliases = merged()) }
-                    say("Created ${it.address}", copy = it.address)
+                    say(context.getString(R.string.vm_alias_created, it.address), copy = it.address)
                 }
                 .onFailure { say(describe(type, it)) }
         }
@@ -143,7 +181,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
                 .onSuccess {
                     cache[alias.provider] = cache[alias.provider].orEmpty().filter { a -> a.id != alias.id }
                     _state.update { s -> s.copy(aliases = merged()) }
-                    say("Deleted ${alias.address}")
+                    say(context.getString(R.string.vm_alias_deleted, alias.address))
                 }
                 .onFailure { say(describe(alias.provider, it)) }
             setBusy(alias.key, false)
@@ -176,10 +214,13 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     private fun setBusy(key: String, on: Boolean) =
         _state.update { it.copy(busy = if (on) it.busy + key else it.busy - key) }
 
-    private fun provider(type: ProviderType) = Providers.create(
-        type,
-        store.get(type) ?: throw ProviderException(Kind.AUTH, "not connected"),
-    )
+    private suspend fun provider(type: ProviderType): AliasProvider =
+        providers[type] ?: withContext(Dispatchers.IO) {
+            val config = store.get(type)
+                ?: throw ProviderException(Kind.AUTH, context.getString(R.string.vm_not_connected))
+            Providers.create(type, config, getApplication<Application>())
+                .also { providers[type] = it }
+        }
 
     private fun merged(): List<Alias> =
         cache.values.flatten().sortedByDescending { it.createdAtMillis ?: 0L }
@@ -200,11 +241,22 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         val name = type.label
         if (e !is ProviderException) return "$name: ${e.message ?: "unexpected error"}"
         return when (e.kind) {
-            Kind.AUTH -> "$name rejected the API key. It may have been revoked, so update it in Providers."
-            Kind.RATE_LIMIT -> "$name is rate limiting requests (${e.message}). Try again shortly."
-            Kind.NETWORK -> "Couldn't reach $name (${e.message})."
-            Kind.BAD_RESPONSE -> "$name returned something unexpected. Its API may have changed."
-            else -> "$name: ${e.message}"
+            // No HTTP code means the key was never stored, not that the server rejected it.
+            Kind.AUTH ->
+                if (e.httpCode == null && e.detail != null) "$name: ${e.detail}"
+                else context.getString(R.string.vm_invalid_api_key_msg, name)
+            Kind.RATE_LIMIT -> context.getString(
+                R.string.vm_rate_limit_msg,
+                name,
+                context.getString(R.string.http_rate_limited) +
+                    (e.retryAfter?.let { context.getString(R.string.http_retry_later, it) } ?: ""),
+            )
+            Kind.NETWORK -> context.getString(R.string.vm_generic_error, name, e.message)
+            Kind.BAD_RESPONSE -> context.getString(R.string.vm_broken_api, name)
+            Kind.FORBIDDEN -> "$name: ${e.detail ?: context.getString(R.string.http_not_allowed)}"
+            Kind.NOT_FOUND -> "$name: ${e.detail ?: context.getString(R.string.http_not_found)}"
+            Kind.SERVER -> "$name: ${e.detail ?: context.getString(R.string.http_server_error, e.httpCode ?: 0)}"
+            Kind.OTHER -> "$name: ${e.detail ?: "HTTP ${e.httpCode}"}"
         }
     }
 }

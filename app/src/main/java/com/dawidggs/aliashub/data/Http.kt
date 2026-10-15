@@ -1,13 +1,17 @@
 package com.dawidggs.aliashub.data
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
+import okhttp3.Call
+import okhttp3.Callback
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody
 import okhttp3.RequestBody.Companion.toRequestBody
+import okhttp3.Response
 import org.json.JSONException
 import org.json.JSONObject
 import java.io.IOException
@@ -15,6 +19,8 @@ import java.time.LocalDateTime
 import java.time.OffsetDateTime
 import java.time.ZoneOffset
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
+import kotlin.coroutines.resumeWithException
 
 internal object Http {
     private val client: OkHttpClient = OkHttpClient.Builder()
@@ -37,19 +43,40 @@ internal object Http {
     /** API keys must never travel over plain http, so self-hosted URLs have to be https. */
     fun isValidHttpsBase(url: String): Boolean = url.toHttpUrlOrNull()?.isHttps == true
 
-    /** Runs the request off the main thread and returns the body, or throws [ProviderException]. */
-    suspend fun execute(request: Request): String = withContext(Dispatchers.IO) {
+    /**
+     * Sends the request and returns the body, or throws [ProviderException]. Cancelling the
+     * calling coroutine cancels the in-flight HTTP call too.
+     */
+    suspend fun execute(request: Request): String =
         try {
-            client.newCall(request).execute().use { resp ->
-                val text = resp.body.string()
+            client.newCall(request).await().use { resp ->
+                // Reading the body is blocking I/O, keep it off the caller's thread.
+                val text = withContext(Dispatchers.IO) { resp.body.string() }
                 if (!resp.isSuccessful) {
-                    throw errorFor(resp.code, text, resp.header("Retry-After"))
+                    throw ProviderException(
+                        kindFor(resp.code),
+                        extractMessage(text),
+                        resp.code,
+                        resp.header("Retry-After"),
+                    )
                 }
                 text
             }
         } catch (e: IOException) {
             throw ProviderException(ProviderException.Kind.NETWORK, e.message ?: "network error")
         }
+
+    private suspend fun Call.await(): Response = suspendCancellableCoroutine { cont ->
+        cont.invokeOnCancellation { cancel() }
+        enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                if (cont.isActive) cont.resumeWithException(e)
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                if (cont.isActive) cont.resume(response) else response.close()
+            }
+        })
     }
 
     /** Turns malformed or unexpected JSON into a clear "API changed" error instead of a crash. */
@@ -59,32 +86,13 @@ internal object Http {
         throw ProviderException(ProviderException.Kind.BAD_RESPONSE, "unexpected response shape")
     }
 
-    private fun errorFor(code: Int, body: String, retryAfter: String?): ProviderException {
-        val detail = extractMessage(body)
-        return when (code) {
-            401 -> ProviderException(
-                ProviderException.Kind.AUTH,
-                detail ?: "invalid or revoked API key",
-                code
-            )
-            403 -> ProviderException(
-                ProviderException.Kind.FORBIDDEN,
-                detail ?: "not allowed (plan limit or missing permission)",
-                code,
-            )
-            404 -> ProviderException(ProviderException.Kind.NOT_FOUND, detail ?: "not found", code)
-            429 -> ProviderException(
-                ProviderException.Kind.RATE_LIMIT,
-                "rate limited" + (retryAfter?.let { " (retry after ${it}s)" } ?: ""),
-                code,
-            )
-            in 500..599 -> ProviderException(
-                ProviderException.Kind.SERVER,
-                detail ?: "server error $code",
-                code
-            )
-            else -> ProviderException(ProviderException.Kind.OTHER, detail ?: "HTTP $code", code)
-        }
+    private fun kindFor(code: Int): ProviderException.Kind = when (code) {
+        401 -> ProviderException.Kind.AUTH
+        403 -> ProviderException.Kind.FORBIDDEN
+        404 -> ProviderException.Kind.NOT_FOUND
+        429 -> ProviderException.Kind.RATE_LIMIT
+        in 500..599 -> ProviderException.Kind.SERVER
+        else -> ProviderException.Kind.OTHER
     }
 
     /** SimpleLogin uses {"error"}, Addy {"message"}, Relay (Django REST) {"detail"}. */
@@ -95,6 +103,10 @@ internal object Http {
         null
     }
 }
+
+/** `request(path).send()` / `.send("POST", body)`: build and run in one step. */
+internal suspend fun Request.Builder.send(verb: String = "GET", body: RequestBody? = null): String =
+    Http.execute(method(verb, body).build())
 
 /** org.json turns JSON null into the string "null"; this returns "" instead. */
 internal fun JSONObject.str(name: String): String = if (isNull(name)) "" else optString(name, "")

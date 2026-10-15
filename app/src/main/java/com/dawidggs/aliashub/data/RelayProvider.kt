@@ -20,7 +20,7 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
         .header("Accept", "application/json")
 
     override suspend fun list(): List<Alias> {
-        val text = Http.execute(request("/relayaddresses/").get().build())
+        val text = request("/relayaddresses/").send()
         return Http.parsing {
             val t = text.trim()
             // Plain array today; also accept a paginated {"results": [...]} wrapper.
@@ -34,24 +34,24 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
 
     override suspend fun create(spec: CreateRequest): Alias {
         val body = JSONObject().apply { if (spec.note.isNotBlank()) put("description", spec.note) }
-        val text = Http.execute(request("/relayaddresses/").post(Http.jsonBody(body)).build())
+        val text = request("/relayaddresses/").send("POST", Http.jsonBody(body))
         return Http.parsing { parse(JSONObject(text)) }
     }
 
     override suspend fun setEnabled(alias: Alias, enabled: Boolean): Alias {
         val body = JSONObject().put("enabled", enabled)
-        Http.execute(request("/relayaddresses/${alias.id}/").patch(Http.jsonBody(body)).build())
+        request("/relayaddresses/${alias.id}/").send("PATCH", Http.jsonBody(body))
         return alias.copy(enabled = enabled)
     }
 
     override suspend fun updateNote(alias: Alias, note: String): Alias {
         val body = JSONObject().put("description", note)
-        Http.execute(request("/relayaddresses/${alias.id}/").patch(Http.jsonBody(body)).build())
+        request("/relayaddresses/${alias.id}/").send("PATCH", Http.jsonBody(body))
         return alias.copy(note = note)
     }
 
     override suspend fun delete(alias: Alias) {
-        Http.execute(request("/relayaddresses/${alias.id}/").delete().build())
+        request("/relayaddresses/${alias.id}/").send("DELETE")
     }
 
     private fun parse(o: JSONObject) = Alias(

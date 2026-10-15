@@ -1,18 +1,28 @@
 package com.dawidggs.aliashub.data
 
+import com.dawidggs.aliashub.R
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import android.content.Context
 
 /**
  * SimpleLogin REST API. Auth is the raw key in an `Authentication` header.
  * Self-hosted instances work by changing [ProviderConfig.baseUrl].
  */
-class SimpleLoginProvider(private val config: ProviderConfig) : AliasProvider {
+class SimpleLoginProvider(
+        private val config: ProviderConfig,
+        private val context: Context) : AliasProvider {
     override val type = ProviderType.SIMPLELOGIN
 
     private val base = Http.baseUrl(config.baseUrl, "https://app.simplelogin.io")
+
+    /** The account's default mailbox; providers are cached per config, so this survives between calls. */
+    @Volatile
+    private var mailboxId: Long? = null
 
     private fun request(path: String) = Request.Builder()
         .url(base + path)
@@ -24,7 +34,7 @@ class SimpleLoginProvider(private val config: ProviderConfig) : AliasProvider {
         var page = 0
         // The list endpoint is paginated; an empty page marks the end.
         while (page < MAX_PAGES) {
-            val text = Http.execute(request("/api/v2/aliases?page_id=$page").get().build())
+            val text = request("/api/v2/aliases?page_id=$page").send()
             val arr = Http.parsing { JSONObject(text).optJSONArray("aliases") } ?: break
             if (arr.length() == 0) break
             Http.parsing { for (i in 0 until arr.length()) out += parse(arr.getJSONObject(i)) }
@@ -33,19 +43,16 @@ class SimpleLoginProvider(private val config: ProviderConfig) : AliasProvider {
         return out
     }
 
-    override suspend fun createOptions(): CreateOptions {
-        val text = Http.execute(request("/api/v5/alias/options").get().build())
-        val root = Http.parsing { JSONObject(text) }
+    override suspend fun createOptions(): CreateOptions = coroutineScope {
+        // Independent requests, so run them side by side. The mailbox is only needed later by
+        // create(), but fetching it now removes a round trip from the "Create" tap.
+        val optionsReq = async { request("/api/v5/alias/options").send() }
+        val premiumReq = async { isPremium() }
+        val mailboxReq = async { prefetchMailbox() }
 
-        // Free accounts can't use premium suffixes, so hide them when the plan is known.
-        // If the plan can't be read, everything is shown and the server decides.
-        val premium = try {
-            val info = Http.execute(request("/api/user_info").get().build())
-            Http.parsing { JSONObject(info).optBoolean("is_premium", true) }
-        } catch (e: ProviderException) {
-            if (e.kind == ProviderException.Kind.AUTH) throw e
-            true
-        }
+        val root = Http.parsing { JSONObject(optionsReq.await()) }
+        val premium = premiumReq.await()
+        mailboxReq.await()
 
         val suffixes = Http.parsing {
             val arr = root.optJSONArray("suffixes") ?: JSONArray()
@@ -61,13 +68,34 @@ class SimpleLoginProvider(private val config: ProviderConfig) : AliasProvider {
             out
         }
 
-        val random = DomainOption(RANDOM_ID, "Random (SimpleLogin picks the name)")
-        return CreateOptions(
+        val random = DomainOption(RANDOM_ID, context.getString(R.string.sl_random_option))
+        CreateOptions(
             domains = listOf(random) + suffixes,
             defaultId = RANDOM_ID,
             warning = if (root.optBoolean("can_create", true)) null
-            else "SimpleLogin says you can't create more aliases on your current plan.",
+            else context.getString(R.string.sl_limit_reached),
         )
+    }
+
+    /**
+     * Free accounts can't use premium suffixes, so hide them when the plan is known.
+     * If the plan can't be read, everything is shown and the server decides.
+     */
+    private suspend fun isPremium(): Boolean = try {
+        val info = request("/api/user_info").send()
+        Http.parsing { JSONObject(info).optBoolean("is_premium", true) }
+    } catch (e: ProviderException) {
+        if (e.kind == ProviderException.Kind.AUTH) throw e
+        true
+    }
+
+    /** Best effort: a failure here is retried (and reported) by create() when it matters. */
+    private suspend fun prefetchMailbox() {
+        try {
+            preferredMailboxId()
+        } catch (e: ProviderException) {
+            if (e.kind == ProviderException.Kind.AUTH) throw e
+        }
     }
 
     override suspend fun create(spec: CreateRequest): Alias {
@@ -86,13 +114,14 @@ class SimpleLoginProvider(private val config: ProviderConfig) : AliasProvider {
             body.put("mailbox_ids", JSONArray().put(preferredMailboxId()))
             path = "/api/v3/alias/custom/new"
         }
-        val text = Http.execute(request(path).post(Http.jsonBody(body)).build())
+        val text = request(path).send("POST", Http.jsonBody(body))
         return Http.parsing { parse(JSONObject(text)) }
     }
 
     /** Custom aliases must name a mailbox, so use the account's default one. */
     private suspend fun preferredMailboxId(): Long {
-        val text = Http.execute(request("/api/v2/mailboxes").get().build())
+        mailboxId?.let { return it }
+        val text = request("/api/v2/mailboxes").send()
         return Http.parsing {
             val arr = JSONObject(text).getJSONArray("mailboxes")
             var first: Long? = null
@@ -103,29 +132,29 @@ class SimpleLoginProvider(private val config: ProviderConfig) : AliasProvider {
                 if (first == null) first = id
                 if (m.optBoolean("default", false)) preferred = id
             }
-            preferred ?: first ?: throw ProviderException(
+            (preferred ?: first ?: throw ProviderException(
                 ProviderException.Kind.OTHER,
-                "no mailbox found on your SimpleLogin account",
-            )
+                context.getString(R.string.sl_no_mailbox_found),
+            )).also { mailboxId = it }
         }
     }
 
     override suspend fun setEnabled(alias: Alias, enabled: Boolean): Alias {
         if (alias.enabled == enabled) return alias
         // SimpleLogin only offers a toggle, so read the resulting state from the reply.
-        val text = Http.execute(request("/api/aliases/${alias.id}/toggle").post(Http.EMPTY_BODY).build())
+        val text = request("/api/aliases/${alias.id}/toggle").send("POST", Http.EMPTY_BODY)
         val now = Http.parsing { JSONObject(text).getBoolean("enabled") }
         return alias.copy(enabled = now)
     }
 
     override suspend fun updateNote(alias: Alias, note: String): Alias {
         val body = JSONObject().put("note", note)
-        Http.execute(request("/api/aliases/${alias.id}").patch(Http.jsonBody(body)).build())
+        request("/api/aliases/${alias.id}").send("PATCH", Http.jsonBody(body))
         return alias.copy(note = note)
     }
 
     override suspend fun delete(alias: Alias) {
-        Http.execute(request("/api/aliases/${alias.id}").delete().build())
+        request("/api/aliases/${alias.id}").send("DELETE")
     }
 
     private fun parse(o: JSONObject) = Alias(

@@ -31,24 +31,27 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.dawidggs.aliashub.AliasViewModel
 import com.dawidggs.aliashub.UiState
 import com.dawidggs.aliashub.data.ProviderType
-import androidx.compose.ui.tooling.preview.Preview
+import com.dawidggs.aliashub.R
 
 @Composable
 fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text(if (onClose == null) "Connect a provider" else "Providers") },
+                title = { Text(if (onClose == null) stringResource(R.string.connect_provider) else stringResource(R.string.providers)) },
                 navigationIcon = {
                     if (onClose != null) {
                         IconButton(onClick = onClose) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(
+                                R.string.back_button
+                            ))
                         }
                     }
                 },
@@ -80,11 +83,11 @@ private fun ConnectedCard(type: ProviderType, onRemove: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "${type.label} · connected",
+                stringResource(R.string.provider_connected, type.label),
                 style = MaterialTheme.typography.titleMedium,
                 modifier = Modifier.weight(1f),
             )
-            Button(onClick = onRemove) { Text("Remove") }
+            Button(onClick = onRemove) { Text(stringResource(R.string.remove_button)) }
         }
     }
 }
@@ -107,7 +110,7 @@ private fun ConnectCard(type: ProviderType, onConnect: (token: String, baseUrl: 
             OutlinedTextField(
                 value = token,
                 onValueChange = { token = it },
-                label = { Text("API key") },
+                label = { Text(stringResource(R.string.api_key)) },
                 singleLine = true,
                 visualTransformation = PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
@@ -117,14 +120,14 @@ private fun ConnectCard(type: ProviderType, onConnect: (token: String, baseUrl: 
                 OutlinedTextField(
                     value = baseUrl,
                     onValueChange = { baseUrl = it },
-                    label = { Text("Self-hosted URL (optional)") },
+                    label = { Text(stringResource(R.string.self_hosted_url)) },
                     placeholder = { Text("https://…") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else {
                 Text(
-                    "Relay's API is unofficial and may change. If it breaks, the other providers keep working.",
+                    stringResource(R.string.relay_warning),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -135,13 +138,17 @@ private fun ConnectCard(type: ProviderType, onConnect: (token: String, baseUrl: 
             Button(onClick = {
                 error = onConnect(token, baseUrl)
                 if (error == null) token = ""
-            }) { Text("Connect") }
+            }) { Text(stringResource(R.string.connect_button)) }
         }
     }
 }
 
+@Composable
 private fun keyHint(type: ProviderType): String = when (type) {
-    ProviderType.SIMPLELOGIN -> "Create a key under Settings → API Keys on app.simplelogin.io."
-    ProviderType.ADDY -> "Create a key under Settings → API on app.addy.io."
-    ProviderType.RELAY -> "Find your API key in your account settings on relay.firefox.com."
+    ProviderType.SIMPLELOGIN ->
+        stringResource(R.string.api_key_creation_instruction_sl)
+    ProviderType.ADDY ->
+        stringResource(R.string.api_key_creation_instruction_addy)
+    ProviderType.RELAY ->
+        stringResource(R.string.api_key_creation_instruction_relay)
 }

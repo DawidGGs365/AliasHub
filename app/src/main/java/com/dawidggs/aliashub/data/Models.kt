@@ -56,11 +56,16 @@ data class Alias(
     val key: String get() = "${provider.name}:$id"
 }
 
+/**
+ * Carries no user-facing text of its own for HTTP failures: [detail] is whatever the server said
+ * (if anything) and the UI layer turns [kind] into a localized message.
+ */
 class ProviderException(
     val kind: Kind,
-    message: String,
+    val detail: String? = null,
     val httpCode: Int? = null,
-) : Exception(message) {
+    val retryAfter: String? = null,
+) : Exception(detail) {
     enum class Kind { AUTH, FORBIDDEN, NOT_FOUND, RATE_LIMIT, SERVER, NETWORK, BAD_RESPONSE, OTHER }
 }
 
