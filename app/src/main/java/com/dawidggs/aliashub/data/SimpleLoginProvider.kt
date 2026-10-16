@@ -29,6 +29,10 @@ class SimpleLoginProvider(
         .header("Authentication", config.token)
         .header("Accept", "application/json")
 
+    override suspend fun verify() {
+        request("/api/user_info").send()
+    }
+
     override suspend fun list(): List<Alias> {
         val out = mutableListOf<Alias>()
         var page = 0

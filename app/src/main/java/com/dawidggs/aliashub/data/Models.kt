@@ -6,6 +6,9 @@ enum class ProviderType(val label: String) {
     RELAY("Firefox Relay"),
 }
 
+/** How the app picks its colors. OLED is dark with a pure black background. */
+enum class ThemeMode { SYSTEM, LIGHT, DARK, OLED }
+
 /** What the user entered for one provider. [baseUrl] is only set for self-hosted instances. */
 data class ProviderConfig(
     val token: String,
@@ -19,7 +22,7 @@ data class ProviderConfig(
 data class DomainOption(
     val id: String,
     val label: String,
-    /** True when the user can type the part before the "@" (SimpleLogin suffixes, Addy username domains). */
+    /** True when the user can type the part before the "@" (SimpleLogin suffixes, Addy username domains, anonaddy.com/.me). */
     val needsPrefix: Boolean = false,
     /** True when that name can't be left blank (Addy username domains only accept custom names). */
     val prefixRequired: Boolean = false,
@@ -72,6 +75,8 @@ class ProviderException(
 /** Every service implements this; the UI never talks to a service directly. */
 interface AliasProvider {
     val type: ProviderType
+    /** One cheap authenticated call; throws [ProviderException] (AUTH for a bad key) if it fails. */
+    suspend fun verify()
     suspend fun list(): List<Alias>
     suspend fun createOptions(): CreateOptions
     suspend fun create(spec: CreateRequest): Alias

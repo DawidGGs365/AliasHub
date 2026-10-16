@@ -21,6 +21,8 @@
     <string name="note">Note (optional)</string>
     <string name="note_placeholder">Where will you use it?</string>
     <string name="create_button">Create</string>
+    <string name="vm_new_key_rejected">%1$s rejected this API key. Check that you copied it correctly (and the server URL, if self-hosted).</string>
+    <string name="checking_button">Checking key…</string>
     <string name="cancel_button">Cancel</string>
     <string name="edit_note">Edit note</string>
     <string name="save_button">Save</string>
@@ -60,4 +62,17 @@
     <string name="http_rate_limited">rate limited</string>
     <string name="http_retry_later">" (retry after %1$ss)"</string>
     <string name="http_server_error">server error %1$d</string>
+    <string name="theme">Theme</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="theme_oled">Dark (OLED black)</string>
+    <string name="alias_blocked">%1$d blocked</string>
+    <string name="alias_forwarded">%1$d forwarded</string>
+    <string name="setup_welcome">Welcome to AliasHub</string>
+    <string name="setup_welcome_text">All your email aliases from SimpleLogin, Addy.io and Firefox Relay, in one place.</string>
+    <string name="setup_next_button">Next</string>
+    <string name="setup_add_first_provider">Let\'s add your first provider</string>
+    <string name="setup_self_hosted_button">Self-hosted instance?</string>
+    <string name="settings_title">Settings</string>
 </resources>

@@ -19,6 +19,10 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
         .header("Authorization", "Token ${config.token}")
         .header("Accept", "application/json")
 
+    override suspend fun verify() {
+        request("/relayaddresses/").send()
+    }
+
     override suspend fun list(): List<Alias> {
         val text = request("/relayaddresses/").send()
         return Http.parsing {

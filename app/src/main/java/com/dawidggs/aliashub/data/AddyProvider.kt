@@ -26,6 +26,10 @@ class AddyProvider(
         .header("Accept", "application/json")
         .header("X-Requested-With", "XMLHttpRequest")
 
+    override suspend fun verify() {
+        request("/account-details").send()
+    }
+
     override suspend fun list(): List<Alias> {
         val out = mutableListOf<Alias>()
         var page = 1
@@ -61,13 +65,14 @@ class AddyProvider(
                     val username = usernameReq.await()
                     CreateOptions(
                         domains = domains.map { d ->
-                            // Username domains (name.anonaddy.com) only accept a custom name.
-                            val needsName = isUsernameDomain(d, domains, username)
+                            // Username domains (name.anonaddy.com) only accept a custom name;
+                            // the shared anonaddy.com / anonaddy.me take one optionally.
+                            val usernameDomain = isUsernameDomain(d, domains, username)
                             DomainOption(
                                 id = d,
                                 label = d,
-                                needsPrefix = needsName,
-                                prefixRequired = needsName,
+                                needsPrefix = usernameDomain || d.lowercase() in OPTIONAL_NAME_DOMAINS,
+                                prefixRequired = usernameDomain,
                                 joiner = "@",
                             )
                         },
@@ -102,7 +107,9 @@ class AddyProvider(
         }
 
     private fun fallback(reason: String) = CreateOptions(
-        domains = FALLBACK_DOMAINS.map { DomainOption(id = it, label = it) },
+        domains = FALLBACK_DOMAINS.map {
+            DomainOption(id = it, label = it, needsPrefix = true, prefixRequired = false, joiner = "@")
+        },
         defaultId = FALLBACK_DOMAINS.first(),
         warning = context.getString(
             R.string.addy_fallback_warning,
@@ -161,5 +168,8 @@ class AddyProvider(
         const val PAGE_SIZE = 100
         const val MAX_PAGES = 200
         val FALLBACK_DOMAINS = listOf("anonaddy.me", "anonaddy.com")
+
+        /** Shared domains where a custom name is optional (blank = random characters). */
+        val OPTIONAL_NAME_DOMAINS = setOf("anonaddy.me", "anonaddy.com")
     }
 }

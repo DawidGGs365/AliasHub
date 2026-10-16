@@ -13,9 +13,11 @@ import com.dawidggs.aliashub.data.ProviderException
 import com.dawidggs.aliashub.data.ProviderException.Kind
 import com.dawidggs.aliashub.data.ProviderType
 import com.dawidggs.aliashub.data.Providers
+import com.dawidggs.aliashub.data.ThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,6 +35,7 @@ data class UiState(
     /** False until the credential store has been read (it is opened off the main thread). */
     val initialized: Boolean = false,
     val configured: List<ProviderType> = emptyList(),
+    val themeMode: ThemeMode = ThemeMode.SYSTEM,
     val aliases: List<Alias> = emptyList(),
     val loading: Boolean = false,
     /** One message per provider that failed, so a broken one never hides the others. */
@@ -68,7 +71,11 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     /** In-flight list request per provider; a new refresh replaces (cancels) the old one. */
     private val loads = mutableMapOf<ProviderType, Job>()
 
-    private val _state = MutableStateFlow(UiState())
+    // Not a secret, so plain preferences. It is tiny and read synchronously so the first frame
+    // already has the right theme.
+    private val prefs = app.getSharedPreferences("aliashub_prefs", Context.MODE_PRIVATE)
+
+    private val _state = MutableStateFlow(UiState(themeMode = loadThemeMode()))
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val _messages = Channel<Message>(Channel.BUFFERED)
@@ -80,6 +87,18 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
             _state.update { it.copy(initialized = true, configured = configured) }
             refresh()
         }
+    }
+
+    // ---- theme ------------------------------------------------------------------------------
+
+    private fun loadThemeMode(): ThemeMode =
+        prefs.getString(KEY_THEME, null)
+            ?.let { saved -> ThemeMode.entries.firstOrNull { it.name == saved } }
+            ?: ThemeMode.SYSTEM
+
+    fun setThemeMode(mode: ThemeMode) {
+        prefs.edit().putString(KEY_THEME, mode.name).apply()
+        _state.update { it.copy(themeMode = mode) }
     }
 
     // ---- loading ----------------------------------------------------------------------
@@ -112,23 +131,43 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        // After the loop: a cancelled predecessor may have already cleared the flag.
+        // After the loop: a canceled predecessor may have already cleared the flag.
         _state.update { it.copy(loading = loads.isNotEmpty()) }
     }
 
     // ---- provider setup -----------------------------------------------------------------
 
-    /** Returns an error message to show, or null if saved. The stored key is never handed back to the UI. */
-    fun saveConfig(type: ProviderType, token: String, baseUrl: String): String? {
+    /**
+     * Checks the key against the service with a test call and only then stores it.
+     * Returns an error message to show, or null if saved. The stored key is never handed back to the UI.
+     */
+    suspend fun saveConfig(type: ProviderType, token: String, baseUrl: String): String? {
         val key = token.trim()
         if (key.isEmpty()) return context.getString(R.string.vm_empty_api_key_box)
         val base = baseUrl.trim().ifEmpty { null }
         if (base != null && !Http.isValidHttpsBase(base)) {
             return context.getString(R.string.vm_invalid_selfost_url)
         }
-        store.save(type, ProviderConfig(token = key, baseUrl = base))
+        val config = ProviderConfig(token = key, baseUrl = base)
+
+        // Nothing is stored unless this succeeds, so a typo never ends up as a "connected" provider.
+        val check = attempt { Providers.create(type, config, context).verify() }
+        check.exceptionOrNull()?.let { e ->
+            // The generic "key may have been revoked" text makes no sense for a key just typed in.
+            return if (e is ProviderException && e.kind == Kind.AUTH && e.httpCode != null) {
+                context.getString(R.string.vm_new_key_rejected, type.label)
+            } else {
+                describe(type, e)
+            }
+        }
+
+        // Not cancellable: leaving the screen right after the check must not drop a verified key.
+        val configured = withContext(Dispatchers.IO + NonCancellable) {
+            store.save(type, config)
+            store.configuredTypes()
+        }
         providers.remove(type)
-        _state.update { it.copy(configured = store.configuredTypes(), errors = it.errors - type) }
+        _state.update { it.copy(configured = configured, errors = it.errors - type) }
         refresh(type)
         return null
     }
@@ -258,5 +297,9 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
             Kind.SERVER -> "$name: ${e.detail ?: context.getString(R.string.http_server_error, e.httpCode ?: 0)}"
             Kind.OTHER -> "$name: ${e.detail ?: "HTTP ${e.httpCode}"}"
         }
+    }
+
+    private companion object {
+        const val KEY_THEME = "theme_mode"
     }
 }

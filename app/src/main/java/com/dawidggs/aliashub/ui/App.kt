@@ -6,6 +6,18 @@ import android.content.Context
 import android.os.Build
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -28,13 +40,48 @@ fun AliasHubApp(vm: AliasViewModel = viewModel()) {
     // The credential store loads off the main thread; don't flash the setup screen meanwhile.
     if (!state.initialized) return
 
-    if (needsSetup || showSettings) {
-        // First run has nothing to go back to, so no close button until a provider exists.
-        SettingsScreen(state = state, vm = vm, onClose = if (needsSetup) null else close)
-    } else {
-        AliasListScreen(state = state, vm = vm, onOpenSettings = { showSettings = true })
+    val screen = when {
+        needsSetup -> Screen.SETUP
+        showSettings -> Screen.SETTINGS
+        else -> Screen.LIST
+    }
+
+    // Forward (deeper) screens slide in from the right over the old one, which drifts away a
+    // little slower (parallax); going back reverses it with the old screen sliding off on top.
+    AnimatedContent(
+        targetState = screen,
+        transitionSpec = {
+            val forward = targetState.depth > initialState.depth
+            val spec = tween<IntOffset>(durationMillis = 350, easing = FastOutSlowInEasing)
+            ContentTransform(
+                targetContentEnter = slideInHorizontally(spec) { w -> if (forward) w else -w / 4 },
+                initialContentExit = slideOutHorizontally(spec) { w -> if (forward) -w / 4 else w },
+                targetContentZIndex = if (forward) 1f else -1f,
+            )
+        },
+        label = "screen",
+    ) { target ->
+        // Opaque, so the screen underneath never shows through mid-slide.
+        Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            when (target) {
+                // No provider yet: welcome + "add your first provider". If the user just removed
+                // their last provider from Settings, skip the welcome page.
+                Screen.SETUP -> SetupScreen(vm = vm, startPage = if (showSettings) 1 else 0)
+                Screen.SETTINGS -> SettingsScreen(state = state, vm = vm, onClose = close)
+                Screen.LIST -> AliasListScreen(
+                    state = state,
+                    vm = vm,
+                    onOpenSettings = { showSettings = true },
+                )
+            }
+        }
     }
 }
+
+/** Screens ordered by how deep they sit in the flow; decides which way a transition slides. */
+private enum class Screen(val depth: Int) { SETUP(0), LIST(1), SETTINGS(2) }
+
+
 
 fun copyToClipboard(context: Context, text: String) {
     val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager

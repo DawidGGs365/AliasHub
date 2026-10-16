@@ -21,6 +21,8 @@
     <string name="note">Notatka (opcjonalna)</string>
     <string name="note_placeholder">Gdzie będzie używany?</string>
     <string name="create_button">Utwórz</string>
+    <string name="vm_new_key_rejected">%1$s odrzucił ten klucz API. Sprawdź, czy został poprawnie skopiowany (oraz adres serwera, jeśli jest własny).</string>
+    <string name="checking_button">Sprawdzanie klucza…</string>
     <string name="cancel_button">Anuluj</string>
     <string name="edit_note">Edytuj notatkę</string>
     <string name="save_button">Zapisz</string>
@@ -54,4 +56,23 @@
     <string name="vm_not_connected">nie połączono</string>
     <string name="alias_info">%1$s · %2$d przekierowane · %3$d zablokowane</string>
     <string name="more_actions_button">Więcej akcji</string>
+    <string name="http_invalid_api_key">nieprawidłowy lub nieważny klucz API</string>
+    <string name="http_not_allowed">niedozwolone (brakujące uprawnienia lub limit planu</string>
+    <string name="http_not_found">nie znaleziono</string>
+    <string name="http_rate_limited">przekroczono limit zapytań</string>
+    <string name="http_retry_later">" (spróbuj ponownie za %1$ss)"</string>
+    <string name="http_server_error">błąd serwera %1$d</string>
+    <string name="theme">Motyw</string>
+    <string name="theme_system">Domyślny systemowy</string>
+    <string name="theme_light">Jasny</string>
+    <string name="theme_dark">Ciemny</string>
+    <string name="theme_oled">Ciemny (czarny OLED)</string>
+    <string name="alias_blocked">%1$d zablokowane</string>
+    <string name="alias_forwarded">%1$d przekierowane</string>
+    <string name="setup_welcome">Witaj w AliasHub</string>
+    <string name="setup_welcome_text">Wszystkie Twoje aliasy e-mail z SimpleLogin, Addy.io i Firefox Relay w jednym miejscu.</string>
+    <string name="setup_next_button">Dalej</string>
+    <string name="setup_add_first_provider">Dodajmy Twojego pierwszego dostawcę</string>
+    <string name="setup_self_hosted_button">Własny serwer?</string>
+    <string name="settings_title">Ustawienia</string>
 </resources>
