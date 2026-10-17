@@ -3,6 +3,8 @@ agp = "9.4.1"
 kotlin = "2.4.21"
 #foojay-resolver = "1.0.0"
 compose-bom = "2026.09.00"
+# The BOM pins material3 1.4.0 (stable); SegmentedListItem needs the 1.5 line.
+material3 = "1.5.0-beta01"
 activity-compose = "1.13.0"
 lifecycle = "2.11.0"
 security-crypto = "1.1.0"
@@ -14,7 +16,7 @@ errorprone-annotations = "2.42.0"
 compose-bom = { module = "androidx.compose:compose-bom", version.ref = "compose-bom" }
 compose-ui = { module = "androidx.compose.ui:ui" }
 compose-ui-tooling-preview = { module = "androidx.compose.ui:ui-tooling-preview" }
-compose-material3 = { module = "androidx.compose.material3:material3" }
+compose-material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 compose-material-icons-core = { module = "androidx.compose.material:material-icons-core" }
 compose-ui-tooling = { module = "androidx.compose.ui:ui-tooling" }
 
@@ -24,7 +26,7 @@ lifecycle-runtime-compose = { module = "androidx.lifecycle:lifecycle-runtime-com
 errorprone-annotations = { module = "com.google.errorprone:error_prone_annotations", version.ref = "errorprone-annotations" }
 
 material-icons-core = { module = "androidx.compose.material:material-icons-core" }
-material3 = { module = "androidx.compose.material3:material3" }
+material3 = { module = "androidx.compose.material3:material3", version.ref = "material3" }
 security-crypto = { module = "androidx.security:security-crypto", version.ref = "security-crypto" }
 okhttp = { module = "com.squareup.okhttp3:okhttp", version.ref = "okhttp" }
 coroutines-android = { module = "org.jetbrains.kotlinx:kotlinx-coroutines-android", version.ref = "coroutines" }

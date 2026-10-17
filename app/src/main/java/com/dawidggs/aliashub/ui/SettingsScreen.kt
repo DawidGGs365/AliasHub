@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 
 package com.dawidggs.aliashub.ui
 
@@ -13,31 +13,35 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.LargeFlexibleTopAppBar
+import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.ListItemShapes
+import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
-import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -47,9 +51,7 @@ import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
@@ -61,9 +63,11 @@ import com.dawidggs.aliashub.R
 
 @Composable
 fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
     Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
-            TopAppBar(
+            LargeFlexibleTopAppBar(
                 title = { Text(stringResource(R.string.settings_title)) },
                 navigationIcon = {
                     if (onClose != null) {
@@ -74,26 +78,34 @@ fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
                         }
                     }
                 },
+                scrollBehavior = scrollBehavior,
             )
         },
     ) { padding ->
+        val providers = ProviderType.entries
         LazyColumn(
             modifier = Modifier.padding(padding),
             contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
         ) {
-            items(ProviderType.entries.toList()) { type ->
+            // One group for the providers (connected or not), one for the theme.
+            itemsIndexed(providers) { index, type ->
+                val shapes = ListItemDefaults.segmentedShapes(index = index, count = providers.size)
                 if (type in state.configured) {
-                    ConnectedCard(type, onRemove = { vm.removeProvider(type) })
+                    ConnectedItem(type, shapes, onRemove = { vm.removeProvider(type) })
                 } else {
-                    ConnectCard(type, onConnect = { token, baseUrl ->
+                    ConnectItem(type, shapes, onConnect = { token, baseUrl ->
                         vm.saveConfig(type, token, baseUrl)
                     })
                 }
             }
             if (onClose != null) {
                 item {
-                    ThemeCard(selected = state.themeMode, onSelect = vm::setThemeMode)
+                    ThemeItem(
+                        selected = state.themeMode,
+                        onSelect = vm::setThemeMode,
+                        modifier = Modifier.padding(top = 16.dp),
+                    )
                 }
             }
         }
@@ -102,36 +114,37 @@ fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
 
 /** A connected provider is just its name and a way to disconnect it. */
 @Composable
-private fun ConnectedCard(type: ProviderType, onRemove: () -> Unit) {
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+private fun ConnectedItem(type: ProviderType, shapes: ListItemShapes, onRemove: () -> Unit) {
+    SegmentedListItem(
+        shapes = shapes,
+        colors = groupedItemColors(),
+        leadingContent = {
             Icon(
-                painter = when(type) {
-                    ProviderType.SIMPLELOGIN -> painterResource(R.drawable.ic_sl)
-                    ProviderType.ADDY -> painterResource(R.drawable.ic_addy)
-                    ProviderType.RELAY -> painterResource(R.drawable.ic_relay)
-                },
+                painter = providerIcon(type),
                 contentDescription = null,
                 modifier = Modifier.size(32.dp),
             )
-            Spacer(
-                modifier = Modifier.width(10.dp)
-            )
+        },
+        trailingContent = {
+            Button(onClick = onRemove, shapes = ButtonDefaults.shapes()) {
+                Text(stringResource(R.string.remove_button))
+            }
+        },
+        content = {
             Text(
                 stringResource(R.string.provider_connected, type.label),
                 style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
             )
-            Button(onClick = onRemove) { Text(stringResource(R.string.remove_button)) }
-        }
-    }
+        },
+    )
 }
 
 @Composable
-private fun ConnectCard(type: ProviderType, onConnect: suspend (token: String, baseUrl: String) -> String?) {
+private fun ConnectItem(
+    type: ProviderType,
+    shapes: ListItemShapes,
+    onConnect: suspend (token: String, baseUrl: String) -> String?,
+) {
     // Plain remember (not rememberSaveable) so the secret doesn't end up in saved instance state.
     var token by remember(type) { mutableStateOf("") }
     var baseUrl by remember(type) { mutableStateOf("") }
@@ -139,82 +152,89 @@ private fun ConnectCard(type: ProviderType, onConnect: suspend (token: String, b
     var checking by remember(type) { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
+    SegmentedListItem(
+        shapes = shapes,
+        colors = groupedItemColors(),
+        contentPadding = PaddingValues(16.dp),
+        supportingContent = {
+            Column(
+                modifier = Modifier.padding(top = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(keyHint(type), style = MaterialTheme.typography.bodySmall)
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            Text(type.label, style = MaterialTheme.typography.titleMedium)
-            Text(keyHint(type), style = MaterialTheme.typography.bodySmall)
-
-            TextField(
-                value = token,
-                onValueChange = { token = it },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ),
-                shape = RoundedCornerShape(16.dp),
-                label = { Text(stringResource(R.string.api_key)) },
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            if (type != ProviderType.RELAY) {
                 TextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
+                    value = token,
+                    onValueChange = { token = it },
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                     ),
                     shape = RoundedCornerShape(16.dp),
-                    label = { Text(stringResource(R.string.self_hosted_url)) },
-                    placeholder = { Text("https://…") },
+                    label = { Text(stringResource(R.string.api_key)) },
                     singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     modifier = Modifier.fillMaxWidth(),
                 )
-            } else {
-                Text(
-                    stringResource(R.string.relay_warning),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            error?.let {
-                Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
-            }
-            Button(
-                enabled = !checking,
-                onClick = {
-                    error = null
-                    checking = true
-                    scope.launch {
-                        // Tests the key against the service before it is stored.
-                        error = onConnect(token, baseUrl)
-                        if (error == null) token = ""
-                        checking = false
-                    }
-                },
-            ) {
-                if (checking) {
-                    CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
-                    Spacer(Modifier.width(8.dp))
+                if (type != ProviderType.RELAY) {
+                    TextField(
+                        value = baseUrl,
+                        onValueChange = { baseUrl = it },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ),
+                        shape = RoundedCornerShape(16.dp),
+                        label = { Text(stringResource(R.string.self_hosted_url)) },
+                        placeholder = { Text("https://…") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                } else {
+                    Text(
+                        stringResource(R.string.relay_warning),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
-                Text(stringResource(if (checking) R.string.checking_button else R.string.connect_button))
+                error?.let {
+                    Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodySmall)
+                }
+                Button(
+                    enabled = !checking,
+                    shapes = ButtonDefaults.shapes(),
+                    onClick = {
+                        error = null
+                        checking = true
+                        scope.launch {
+                            // Tests the key against the service before it is stored.
+                            error = onConnect(token, baseUrl)
+                            if (error == null) token = ""
+                            checking = false
+                        }
+                    },
+                ) {
+                    if (checking) {
+                        CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = LocalContentColor.current)
+                        Spacer(Modifier.width(8.dp))
+                    }
+                    Text(stringResource(if (checking) R.string.checking_button else R.string.connect_button))
+                }
             }
-        }
-    }
+        },
+        content = { Text(type.label, style = MaterialTheme.typography.titleMedium) },
+    )
 }
 
+/** The whole row is the tap target; the current choice is the supporting line, menu hangs off the arrow. */
 @Composable
-private fun ThemeCard(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
+private fun ThemeItem(selected: ThemeMode, onSelect: (ThemeMode) -> Unit, modifier: Modifier = Modifier) {
     var expanded by remember { mutableStateOf(false) }
 
-    val selectedLabel = stringResource(
-        when (selected) {
+    @Composable
+    fun label(mode: ThemeMode) = stringResource(
+        when (mode) {
             ThemeMode.SYSTEM -> R.string.theme_system
             ThemeMode.LIGHT -> R.string.theme_light
             ThemeMode.DARK -> R.string.theme_dark
@@ -222,40 +242,25 @@ private fun ThemeCard(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
         },
     )
 
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    SegmentedListItem(
+        onClick = { expanded = true },
+        shapes = ListItemDefaults.segmentedShapes(index = 0, count = 1),
+        colors = groupedItemColors(),
+        modifier = modifier,
+        leadingContent = {
             Icon(
-                painter = when(selected) {
-                ThemeMode.SYSTEM -> painterResource(R.drawable.ic_theme_auto)
-                ThemeMode.LIGHT -> painterResource(R.drawable.ic_theme_light)
-                ThemeMode.DARK -> painterResource(R.drawable.ic_theme_dark)
-                ThemeMode.OLED -> painterResource(R.drawable.ic_theme_dark)
+                painter = when (selected) {
+                    ThemeMode.SYSTEM -> painterResource(R.drawable.ic_theme_auto)
+                    ThemeMode.LIGHT -> painterResource(R.drawable.ic_theme_light)
+                    ThemeMode.DARK, ThemeMode.OLED -> painterResource(R.drawable.ic_theme_dark)
                 },
-                contentDescription = null
+                contentDescription = null,
             )
-            Spacer(
-                modifier = Modifier.width(10.dp)
-            )
-            Text(
-                stringResource(R.string.theme),
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.weight(1f),
-            )
-
+        },
+        supportingContent = { Text(label(selected)) },
+        trailingContent = {
             Box {
-                TextButton(onClick = { expanded = true }) {
-                    Text(selectedLabel)
-                    Icon(
-                        Icons.Default.ArrowDropDown,
-                        contentDescription = null,
-                    )
-                }
-
+                Icon(Icons.Default.ArrowDropDown, contentDescription = null)
                 DropdownMenu(
                     expanded = expanded,
                     onDismissRequest = { expanded = false },
@@ -263,18 +268,7 @@ private fun ThemeCard(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
                 ) {
                     ThemeMode.entries.forEach { mode ->
                         DropdownMenuItem(
-                            text = {
-                                Text(
-                                    stringResource(
-                                        when (mode) {
-                                            ThemeMode.SYSTEM -> R.string.theme_system
-                                            ThemeMode.LIGHT -> R.string.theme_light
-                                            ThemeMode.DARK -> R.string.theme_dark
-                                            ThemeMode.OLED -> R.string.theme_oled
-                                        }
-                                    )
-                                )
-                            },
+                            text = { Text(label(mode)) },
                             onClick = {
                                 onSelect(mode)
                                 expanded = false
@@ -283,8 +277,9 @@ private fun ThemeCard(selected: ThemeMode, onSelect: (ThemeMode) -> Unit) {
                     }
                 }
             }
-        }
-    }
+        },
+        content = { Text(stringResource(R.string.theme), style = MaterialTheme.typography.titleMedium) },
+    )
 }
 
 @Composable

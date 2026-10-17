@@ -40,6 +40,7 @@
     <string name="api_key_creation_instruction_addy">Utwórz klucz w: Ustawienia (Settings) → API na addy.io.</string>
     <string name="api_key_creation_instruction_relay">Znajdź swój klucz API w ustawieniach konta na relay.firefox.com.</string>
     <string name="back_button">Wstecz</string>
+    <string name="clear_button">Wyczyść</string>
     <string name="sl_random_option">Losowa (SimpleLogin wybiera nazwę)</string>
     <string name="sl_limit_reached">SimpleLogin twierdzi że osiągnięto limit aliasów.</string>
     <string name="sl_no_mailbox_found">nie znaleziono skrzynki odbiorczej na koncie SimpleLogin</string>

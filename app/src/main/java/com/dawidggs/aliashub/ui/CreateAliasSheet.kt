@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalMaterial3Api::class)
+@file:OptIn(ExperimentalMaterial3Api::class, ExperimentalMaterial3ExpressiveApi::class)
 
 package com.dawidggs.aliashub.ui
 
@@ -11,26 +11,31 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material3.SheetValue
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -51,18 +56,17 @@ import com.dawidggs.aliashub.data.CreateRequest
 import com.dawidggs.aliashub.data.ProviderType
 
 /**
- * "New alias" bottom sheet. Provider and domain are picked from select boxes; the name field
- * appears only for domains that take a custom name, and is mandatory only when the domain demands it.
+ * "New alias" bottom sheet. The provider is already chosen (from the FAB menu), so only the
+ * domain is picked from a select box; the name field appears only for domains that take a custom
+ * name, and is mandatory only when the domain demands it.
  */
 @Composable
 fun CreateAliasSheet(
-    providers: List<ProviderType>,
-    initial: ProviderType?,
+    provider: ProviderType,
     loadOptions: suspend (ProviderType) -> Pair<CreateOptions?, String?>,
     onDismiss: () -> Unit,
     onCreate: (ProviderType, CreateRequest) -> Unit,
 ) {
-    var selected by remember { mutableStateOf(initial ?: providers.first()) }
     var note by remember { mutableStateOf("") }
     var prefix by remember { mutableStateOf("") }
     var options by remember { mutableStateOf<CreateOptions?>(null) }
@@ -71,13 +75,13 @@ fun CreateAliasSheet(
     var domainId by remember { mutableStateOf<String?>(null) }
 
     // Options depend on the account and (SimpleLogin) carry fresh signed values, so they are
-    // fetched whenever the provider changes and every time the sheet opens.
-    LaunchedEffect(selected) {
+    // fetched every time the sheet opens.
+    LaunchedEffect(provider) {
         loading = true
         options = null
         loadError = null
         domainId = null
-        val (loaded, error) = loadOptions(selected)
+        val (loaded, error) = loadOptions(provider)
         options = loaded
         loadError = error
         domainId = loaded?.defaultId ?: loaded?.domains?.firstOrNull()?.id
@@ -90,7 +94,11 @@ fun CreateAliasSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        // Opens straight to full height (no half-open stop), same as skipPartiallyExpanded did.
+        sheetState = rememberBottomSheetState(
+            initialValue = SheetValue.Hidden,
+            enabledValues = setOf(SheetValue.Hidden, SheetValue.Expanded),
+        ),
     ) {
         Column(
             modifier = Modifier
@@ -101,21 +109,18 @@ fun CreateAliasSheet(
                 .padding(start = 24.dp, end = 24.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            Text(stringResource(R.string.new_alias), style = MaterialTheme.typography.titleLarge)
-
-            if (providers.size > 1) {
-                SelectField(
-                    label = stringResource(R.string.provider),
-                    selected = selected,
-                    options = providers,
-                    optionLabel = { it.label },
-                    onSelect = { selected = it },
+            Column {
+                Text(stringResource(R.string.new_alias), style = MaterialTheme.typography.titleLarge)
+                Text(
+                    provider.label,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
 
             if (loading) {
                 Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                    CircularProgressIndicator(Modifier.size(28.dp))
+                    LoadingIndicator()
                 }
             } else {
                 if (domains.size > 1) {
@@ -128,9 +133,14 @@ fun CreateAliasSheet(
                     )
                 }
                 if (chosen?.needsPrefix == true) {
-                    OutlinedTextField(
+                    TextField(
                         value = prefix,
                         onValueChange = { prefix = it },
+                        colors = TextFieldDefaults.colors(
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        ),
+                        shape = RoundedCornerShape(16.dp),
                         label = {
                             Text(stringResource(if (chosen.prefixRequired) R.string.name else R.string.name_optional))
                         },
@@ -154,9 +164,14 @@ fun CreateAliasSheet(
                 }
             }
 
-            OutlinedTextField(
+            TextField(
                 value = note,
                 onValueChange = { note = it },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ),
+                shape = RoundedCornerShape(16.dp),
                 label = { Text(stringResource(R.string.note)) },
                 placeholder = { Text(stringResource(R.string.note_placeholder)) },
                 modifier = Modifier.fillMaxWidth(),
@@ -175,10 +190,11 @@ fun CreateAliasSheet(
 
             Button(
                 enabled = !loading && !nameMissing,
+                shapes = ButtonDefaults.shapes(),
                 onClick = {
                     // A name typed for one domain must not leak into a domain that doesn't use one.
                     val name = if (chosen?.needsPrefix == true) prefix.trim() else ""
-                    onCreate(selected, CreateRequest(note.trim(), domainId, name))
+                    onCreate(provider, CreateRequest(note.trim(), domainId, name))
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.create_button)) }

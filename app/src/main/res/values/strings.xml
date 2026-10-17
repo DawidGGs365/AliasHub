@@ -40,6 +40,7 @@
     <string name="api_key_creation_instruction_addy">Create a key under Settings → API on app.addy.io.</string>
     <string name="api_key_creation_instruction_relay">Find your API key in your account settings on relay.firefox.com.</string>
     <string name="back_button">Back</string>
+    <string name="clear_button">Clear</string>
     <string name="sl_random_option">Random (SimpleLogin picks the name)</string>
     <string name="sl_limit_reached">SimpleLogin says you can\'t create more aliases on your current plan.</string>
     <string name="sl_no_mailbox_found">no mailbox found on your SimpleLogin account</string>
