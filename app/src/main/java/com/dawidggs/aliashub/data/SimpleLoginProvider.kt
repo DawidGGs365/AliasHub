@@ -193,7 +193,7 @@ class SimpleLoginProvider(
             randomDomains = randomDomains,
             defaultRandomDomainId = defaultDomain?.takeIf { d -> randomDomains.any { it.id == d } }
                 ?: randomDomains.firstOrNull()?.id,
-            // Only offered when the current setting is known, so it can be put back afterwards.
+            // Only offered when the current setting is known, so it can be put back afterward.
             suffixStyles = if (currentStyle == null) emptyList() else listOf(
                 ChoiceOption(STYLE_WORD, context.getString(R.string.sl_suffix_word)),
                 ChoiceOption(STYLE_RANDOM, context.getString(R.string.sl_suffix_characters)),

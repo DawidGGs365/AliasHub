@@ -75,7 +75,7 @@
     <string name="setup_add_first_provider">Let\'s add your first provider</string>
     <string name="setup_self_hosted_button">Self-hosted instance?</string>
     <string name="settings_title">Settings</string>
-    <string name="font_system">System font</string>
+    <string name="font_system">Font</string>
     <string name="font_system_on">Using your device\'s font</string>
     <string name="font_system_off">Using the app\'s default font</string>
     <string name="plan_free">Free plan</string>
@@ -103,7 +103,7 @@
     <string name="account_replied">Replies sent</string>
     <string name="manage_account_button">Manage account</string>
     <string name="delete_type_label">Alias address</string>
-    <string name="delete_type_hint">Type %1$s to unlock deletion</string>
+    <string name="delete_type_hint">Type %1$s to delete</string>
     <string name="addy_delete_note">Addy.io only soft-deletes: the alias stays linked to your account and can be restored until you remove it for good with \u201cForget\u201d in the Addy.io dashboard. Deleting here doesn\'t do that.</string>
     <string name="remove_provider_title">Remove %1$s?</string>
     <string name="remove_provider_text">Your API key is erased from this device and its aliases disappear from this app. Nothing is deleted on %1$s, and you can reconnect any time with a key.</string>

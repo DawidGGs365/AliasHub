@@ -1,5 +1,3 @@
-@file:OptIn(ExperimentalMaterial3ExpressiveApi::class)
-
 package com.dawidggs.aliashub.ui
 
 import androidx.compose.foundation.layout.Arrangement
@@ -19,7 +17,6 @@ import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -41,7 +38,7 @@ import com.dawidggs.aliashub.R
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.ProviderType
 
-/** Filled button in the error colors: the confirm action of anything destructive. */
+/** Filled button in the error colors: the confirmation action of anything destructive. */
 @Composable
 private fun DestructiveButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
     Button(

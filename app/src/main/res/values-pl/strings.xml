@@ -75,7 +75,7 @@
     <string name="setup_add_first_provider">Dodajmy Twojego pierwszego dostawcę</string>
     <string name="setup_self_hosted_button">Własny serwer?</string>
     <string name="settings_title">Ustawienia</string>
-    <string name="font_system">Czcionka systemowa</string>
+    <string name="font_system">Czcionka</string>
     <string name="font_system_on">Używana jest czcionka urządzenia</string>
     <string name="font_system_off">Używana jest domyślna czcionka aplikacji</string>
     <string name="plan_free">Plan darmowy</string>
@@ -103,7 +103,7 @@
     <string name="account_replied">Wysłane odpowiedzi</string>
     <string name="manage_account_button">Zarządzaj kontem</string>
     <string name="delete_type_label">Adres aliasu</string>
-    <string name="delete_type_hint">Wpisz %1$s, aby odblokować usuwanie</string>
+    <string name="delete_type_hint">Wpisz %1$s, aby usunąć</string>
     <string name="addy_delete_note">Addy.io usuwa tylko „miękko”: alias pozostaje przypisany do Twojego konta i można go przywrócić, dopóki nie usuniesz go na stałe opcją „Forget” w panelu Addy.io. Usunięcie tutaj tego nie robi.</string>
     <string name="remove_provider_title">Usunąć %1$s?</string>
     <string name="remove_provider_text">Klucz API zostanie usunięty z tego urządzenia, a aliasy znikną z aplikacji. Nic nie zostanie usunięte w %1$s, możesz połączyć się ponownie w dowolnej chwili za pomocą klucza.</string>

@@ -1,12 +1,9 @@
-@file:OptIn(ExperimentalTextApi::class)
-
 package com.dawidggs.aliashub.ui
 
 import android.content.Context
 import android.graphics.Typeface
 import android.os.Build
 import androidx.compose.material3.Typography
-import androidx.compose.ui.text.ExperimentalTextApi
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.AndroidFont
 import androidx.compose.ui.text.font.FontFamily

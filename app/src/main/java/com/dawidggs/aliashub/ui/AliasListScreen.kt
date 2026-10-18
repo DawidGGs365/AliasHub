@@ -43,23 +43,20 @@ import androidx.compose.foundation.text.input.TextFieldLineLimits
 import androidx.compose.foundation.text.input.clearText
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Email
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AppBarWithSearch
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.ExpandedFullScreenSearchBar
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
 import androidx.compose.material3.Icon
@@ -70,6 +67,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBarDefaults
 import androidx.compose.material3.SearchBarValue
 import androidx.compose.material3.SegmentedListItem
+import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SnackbarResult
@@ -98,12 +96,8 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
-import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.painter.Painter
@@ -113,7 +107,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextRange
@@ -128,7 +121,7 @@ import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.ProviderType
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
-import androidx.compose.material3.SnackbarDuration
+import kotlin.time.Duration.Companion.milliseconds
 
 @Composable
 fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Unit) {
@@ -159,7 +152,7 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
         vm.messages.collect { msg ->
             // A snackbar with an action never times out on its own, so every message gets the same
             // 3 s limit here; cancelling showSnackbar takes the snackbar off the screen.
-            val result = withTimeoutOrNull(SNACKBAR_MILLIS) {
+            val result = withTimeoutOrNull(SNACKBAR_MILLIS.milliseconds) {
                 snackbar.showSnackbar(
                     message = msg.text,
                     actionLabel = if (msg.copyText != null) copy else null,
@@ -189,7 +182,7 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
             leadingIcon = {
                 if (searchBarState.currentValue == SearchBarValue.Expanded) {
                     IconButton(onClick = { scope.launch { searchBarState.animateToCollapsed() } }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = backLabel)
+                        Icon(painter = painterResource(R.drawable.ic_arrow_back), contentDescription = backLabel)
                     }
                 } else {
                     Icon(Icons.Default.Search, contentDescription = null)
@@ -214,10 +207,10 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
                 scrollBehavior = searchScrollBehavior,
                 actions = {
                     IconButton(onClick = { vm.refresh() }) {
-                        Icon(Icons.Default.Refresh, contentDescription = stringResource(R.string.refresh_button))
+                        Icon(painter = painterResource(R.drawable.ic_refresh), contentDescription = stringResource(R.string.refresh_button))
                     }
                     IconButton(onClick = onOpenSettings) {
-                        Icon(Icons.Default.Settings, contentDescription = stringResource(R.string.providers))
+                        Icon(painter = painterResource(R.drawable.ic_settings), contentDescription = stringResource(R.string.providers))
                     }
                 },
             )

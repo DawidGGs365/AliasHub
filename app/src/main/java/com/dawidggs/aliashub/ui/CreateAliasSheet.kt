@@ -18,7 +18,6 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -31,7 +30,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.SheetValue
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
@@ -39,6 +37,7 @@ import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,7 +51,6 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.dawidggs.aliashub.R
-import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.CreateOptions
 import com.dawidggs.aliashub.data.CreateRequest
 import com.dawidggs.aliashub.data.GeneratorOption
@@ -119,8 +117,8 @@ fun CreateAliasSheet(
     val showDomain = activeDomains.size > 1 && (generator?.takesDomain ?: true)
     val styles = options?.suffixStyles.orEmpty()
     val showStyle = generator?.takesName == true && styles.size > 1
-    val showName = if (generator != null) generator.takesName else chosen?.needsPrefix == true
-    val nameRequired = if (generator != null) generator.takesName else chosen?.prefixRequired == true
+    val showName = generator?.takesName ?: (chosen?.needsPrefix == true)
+    val nameRequired = generator?.takesName ?: (chosen?.prefixRequired == true)
     val nameMissing = nameRequired && prefix.isBlank()
 
     ModalBottomSheet(
@@ -277,7 +275,7 @@ private fun <T> SelectField(
     onSelect: (T) -> Unit,
 ) {
     var expanded by remember { mutableStateOf(false) }
-    var widthPx by remember { mutableStateOf(0) }
+    var widthPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
 
     Box(Modifier.fillMaxWidth().onSizeChanged { widthPx = it.width }) {

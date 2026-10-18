@@ -44,7 +44,7 @@ data class GeneratorOption(
     val randomDomain: Boolean = false,
 )
 
-/** A plain labelled choice, e.g. SimpleLogin's suffix style. */
+/** A plain labeled choice, e.g. SimpleLogin's suffix style. */
 data class ChoiceOption(val id: String, val label: String)
 
 /** What a provider offers when creating an alias, fetched fresh each time the dialog opens. */

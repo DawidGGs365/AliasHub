@@ -6,6 +6,7 @@ import android.content.Context
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.EncryptedSharedPreferences.create
 import androidx.security.crypto.MasterKey
+import androidx.core.content.edit
 
 /** API keys live only here: AES-256 encrypted, keyed by an Android Keystore master key. */
 class CredentialStore(context: Context) {
@@ -26,17 +27,17 @@ class CredentialStore(context: Context) {
     }
 
     fun save(type: ProviderType, config: ProviderConfig) {
-        prefs.edit()
-            .putString("${type.name}.token", config.token)
-            .putString("${type.name}.baseUrl", config.baseUrl)
-            .apply()
+        prefs.edit {
+            putString("${type.name}.token", config.token)
+                .putString("${type.name}.baseUrl", config.baseUrl)
+        }
     }
 
     fun clear(type: ProviderType) {
-        prefs.edit()
-            .remove("${type.name}.token")
-            .remove("${type.name}.baseUrl")
-            .apply()
+        prefs.edit {
+            remove("${type.name}.token")
+                .remove("${type.name}.baseUrl")
+        }
     }
 
     /** Cheap: checks for the key without decrypting any token. */

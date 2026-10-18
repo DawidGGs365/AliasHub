@@ -150,7 +150,7 @@ class AddyProvider(
     }
 
     /**
-     * The account's username (to recognise its own subdomains) and its default alias format.
+     * The account's username (to recognize its own subdomains) and its default alias format.
      * Both are null if they can't be read.
      */
     private suspend fun accountSettings(): Pair<String?, String?> = try {

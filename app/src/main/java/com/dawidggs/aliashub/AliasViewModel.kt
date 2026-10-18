@@ -31,6 +31,7 @@ import kotlinx.coroutines.withContext
 import android.content.Context
 import com.dawidggs.aliashub.data.AliasProvider
 import java.util.concurrent.ConcurrentHashMap
+import androidx.core.content.edit
 
 data class UiState(
     /** False until the credential store has been read (it is opened off the main thread). */
@@ -110,7 +111,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
             ?: ThemeMode.SYSTEM
 
     fun setThemeMode(mode: ThemeMode) {
-        prefs.edit().putString(KEY_THEME, mode.name).apply()
+        prefs.edit { putString(KEY_THEME, mode.name) }
         _state.update { it.copy(themeMode = mode) }
     }
 
@@ -119,7 +120,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         Providers.dashboardUrl(type, store.get(type)?.baseUrl)
 
     fun setSystemFont(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_SYSTEM_FONT, enabled).apply()
+        prefs.edit { putBoolean(KEY_SYSTEM_FONT, enabled) }
         _state.update { it.copy(systemFont = enabled) }
     }
 
@@ -304,7 +305,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         providers[type] ?: withContext(Dispatchers.IO) {
             val config = store.get(type)
                 ?: throw ProviderException(Kind.AUTH, context.getString(R.string.vm_not_connected))
-            Providers.create(type, config, getApplication<Application>())
+            Providers.create(type, config, getApplication())
                 .also { providers[type] = it }
         }
 
