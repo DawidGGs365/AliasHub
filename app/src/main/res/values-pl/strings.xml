@@ -119,4 +119,6 @@
     <string name="suffix_style">Styl sufiksu</string>
     <string name="sl_suffix_word">Losowe słowo</string>
     <string name="sl_suffix_characters">Losowe znaki</string>
+    <string name="last_sync">Ostatnia synchronizacja: %1$s</string>
+    <string name="last_sync_now">Ostatnia synchronizacja: przed chwilą</string>
 </resources>

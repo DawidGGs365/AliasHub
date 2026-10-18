@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
@@ -39,11 +38,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedListItem
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -56,8 +52,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dawidggs.aliashub.AliasViewModel
@@ -77,8 +71,7 @@ import java.util.Date
 @Composable
 fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
-    // Plan and usage can change on the provider's side, so reload them each time Settings opens.
-    LaunchedEffect(Unit) { vm.refreshAccounts() }
+    // Plan and usage come from the cache the view model keeps current; a manual refresh updates it.
     var removeFor by remember { mutableStateOf<ProviderType?>(null) }
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
@@ -188,17 +181,11 @@ private fun ConnectedItem(
                     ) {
                         Text(stringResource(R.string.manage_account_button))
                     }
-                    Button(
+                    DestructiveButton(
+                        text = stringResource(R.string.remove_button),
                         onClick = onRemove,
-                        shapes = ButtonDefaults.shapes(),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = MaterialTheme.colorScheme.error,
-                            contentColor = MaterialTheme.colorScheme.onError,
-                        ),
                         modifier = Modifier.weight(1f),
-                    ) {
-                        Text(stringResource(R.string.remove_button))
-                    }
+                    )
                 }
             }
         },
@@ -355,34 +342,10 @@ private fun ConnectItem(
             ) {
                 Text(keyHint(type), style = MaterialTheme.typography.bodySmall)
 
-                TextField(
-                    value = token,
-                    onValueChange = { token = it },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text(stringResource(R.string.api_key)) },
-                    singleLine = true,
-                    visualTransformation = PasswordVisualTransformation(),
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                val container = MaterialTheme.colorScheme.surfaceContainerHighest
+                ApiKeyField(value = token, onValueChange = { token = it }, container = container)
                 if (type != ProviderType.RELAY) {
-                    TextField(
-                        value = baseUrl,
-                        onValueChange = { baseUrl = it },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ),
-                        shape = RoundedCornerShape(16.dp),
-                        label = { Text(stringResource(R.string.self_hosted_url)) },
-                        placeholder = { Text("https://…") },
-                        singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
+                    BaseUrlField(value = baseUrl, onValueChange = { baseUrl = it }, container = container)
                 } else {
                     Text(
                         stringResource(R.string.relay_warning),

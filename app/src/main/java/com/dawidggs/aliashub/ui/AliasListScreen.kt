@@ -87,6 +87,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -119,6 +120,9 @@ import com.dawidggs.aliashub.R
 import com.dawidggs.aliashub.UiState
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.ProviderType
+import android.text.format.DateUtils
+import androidx.compose.ui.text.style.TextAlign
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.time.Duration.Companion.milliseconds
@@ -412,7 +416,7 @@ private fun AliasList(
         contentPadding = contentPadding,
         verticalArrangement = Arrangement.spacedBy(ListItemDefaults.SegmentedGap),
     ) {
-        if (visible.isEmpty() && !state.loading) {
+        if (visible.isEmpty() && !state.syncing) {
             item {
                 Text(
                     text = if (state.aliases.isEmpty()) stringResource(R.string.empty_vault_text)
@@ -468,7 +472,42 @@ private fun AliasList(
                 )
             }
         }
+
+        // Only under the main list; the search results have no use for it.
+        val lastSync = state.lastSyncMillis
+        if (grouped && lastSync != null) {
+            item(key = "last-sync") { LastSyncFooter(lastSync, Modifier.animateItem()) }
+        }
     }
+}
+
+/** Small centered "Last synced 5 min. ago", re-evaluated every 30 s while it is on screen. */
+@Composable
+private fun LastSyncFooter(syncedAt: Long, modifier: Modifier = Modifier) {
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(syncedAt) {
+        while (true) {
+            now = System.currentTimeMillis()
+            delay(30_000)
+        }
+    }
+    val elapsed = (now - syncedAt).coerceAtLeast(0)
+    Text(
+        text = if (elapsed < DateUtils.MINUTE_IN_MILLIS) {
+            stringResource(R.string.last_sync_now)
+        } else {
+            stringResource(
+                R.string.last_sync,
+                DateUtils.getRelativeTimeSpanString(
+                    syncedAt, now, DateUtils.MINUTE_IN_MILLIS, DateUtils.FORMAT_ABBREV_RELATIVE,
+                ).toString(),
+            )
+        },
+        style = MaterialTheme.typography.labelSmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center,
+        modifier = modifier.fillMaxWidth().padding(vertical = 8.dp),
+    )
 }
 
 @Composable

@@ -166,8 +166,12 @@ interface AliasProvider {
     suspend fun list(): List<Alias>
     /** Plan, limits and usage as far as this service's API reports them. */
     suspend fun accountInfo(): AccountInfo
-    /** [suffixStyle] (SimpleLogin) asks for custom-alias suffixes of that style; null keeps the account's own. */
-    suspend fun createOptions(suffixStyle: String? = null): CreateOptions
+    /**
+     * [suffixStyle] (SimpleLogin) asks for custom-alias suffixes of that style; null keeps the account's own.
+     * [account] is the account info the app already has; when given, the plan/username are taken
+     * from it instead of being requested again.
+     */
+    suspend fun createOptions(suffixStyle: String? = null, account: AccountInfo? = null): CreateOptions
     suspend fun create(spec: CreateRequest): Alias
     suspend fun setEnabled(alias: Alias, enabled: Boolean): Alias
     suspend fun updateNote(alias: Alias, note: String): Alias

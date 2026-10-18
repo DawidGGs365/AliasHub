@@ -103,12 +103,14 @@ class AddyProvider(
         return AccountInfo(plan, items)
     }
 
-    override suspend fun createOptions(suffixStyle: String?): CreateOptions {
+    override suspend fun createOptions(suffixStyle: String?, account: AccountInfo?): CreateOptions {
         return try {
             coroutineScope {
                 // The username and default format only refine the result, so fetch them alongside
                 // the domain list.
-                val usernameReq = async { accountSettings() }
+                // With the account info at hand there is nothing to request: its username and plan
+                // are all this needs (the default format falls back to /domain-options' own value).
+                val usernameReq = async { account?.let { settingsFrom(it) } ?: accountSettings() }
                 val text = request("/domain-options").send()
                 val (domains, preferred, optionsFormat) = Http.parsing {
                     val root = JSONObject(text)
@@ -159,9 +161,16 @@ class AddyProvider(
         }
     }
 
+    /** Same triple as [accountSettings], read from account info the app already holds. */
+    private fun settingsFrom(account: AccountInfo): Triple<String?, String?, String?> = Triple(
+        account.items.filterIsInstance<AccountItem.Text>().firstOrNull { it.field == AccountField.USERNAME }?.value,
+        null,
+        account.plan?.name,
+    )
+
     /**
-     * The account's username (to recognize its own subdomains) and its default alias format.
-     * Both are null if they can't be read.
+     * The account's username (to recognize its own subdomains), its default alias format and its
+     * plan. Each is null if it can't be read.
      */
     private suspend fun accountSettings(): Triple<String?, String?, String?> = try {
         val text = request("/account-details").send()

@@ -26,11 +26,15 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
     override suspend fun list(): List<Alias> {
         val text = request("/relayaddresses/").send()
         return Http.parsing {
-            val t = text.trim()
-            // Plain array today; also accept a paginated {"results": [...]} wrapper.
-            val arr = if (t.startsWith("[")) JSONArray(t) else JSONObject(t).getJSONArray("results")
+            val arr = jsonItems(text)
             List(arr.length()) { i -> parse(arr.getJSONObject(i)) }
         }
+    }
+
+    /** Plain array today; also accepts a paginated {"results": [...]} wrapper. */
+    private fun jsonItems(text: String): JSONArray {
+        val t = text.trim()
+        return if (t.startsWith("[")) JSONArray(t) else JSONObject(t).getJSONArray("results")
     }
 
     /**
@@ -40,11 +44,7 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
      */
     override suspend fun accountInfo(): AccountInfo {
         val profileText = request("/profiles/").send()
-        val p = Http.parsing {
-            val t = profileText.trim()
-            val arr = if (t.startsWith("[")) JSONArray(t) else JSONObject(t).getJSONArray("results")
-            arr.getJSONObject(0)
-        }
+        val p = Http.parsing { jsonItems(profileText).getJSONObject(0) }
         val premium = p.optBoolean("has_premium", false)
 
         val freeCap = if (premium) null else try {
@@ -77,7 +77,8 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
     }
 
     // Relay masks have no domain or name to choose.
-    override suspend fun createOptions(suffixStyle: String?) = CreateOptions(domains = emptyList(), defaultId = null)
+    override suspend fun createOptions(suffixStyle: String?, account: AccountInfo?) =
+        CreateOptions(domains = emptyList(), defaultId = null)
 
     override suspend fun create(spec: CreateRequest): Alias {
         val body = JSONObject().apply { if (spec.note.isNotBlank()) put("description", spec.note) }

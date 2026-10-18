@@ -3,7 +3,6 @@ package com.dawidggs.aliashub.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,27 +23,19 @@ import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
-import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LocalContentColor
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -52,14 +43,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import com.dawidggs.aliashub.AliasViewModel
@@ -186,8 +173,11 @@ private fun ProviderPage(vm: AliasViewModel) {
             )
             Spacer(Modifier.height(8.dp))
 
-            ProviderDropdown(
+            SelectField(
+                label = stringResource(R.string.provider),
                 selected = type,
+                options = ProviderType.entries,
+                optionLabel = { it.label },
                 onSelect = {
                     type = it
                     error = null
@@ -201,22 +191,14 @@ private fun ProviderPage(vm: AliasViewModel) {
                 modifier = Modifier.fillMaxWidth(),
             )
 
-            TextField(
+            val container = MaterialTheme.colorScheme.surfaceContainerHigh
+            ApiKeyField(
                 value = token,
                 onValueChange = {
                     token = it
                     error = null
                 },
-                label = { Text(stringResource(R.string.api_key)) },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ),
-                shape = RoundedCornerShape(16.dp),
-                singleLine = true,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-                modifier = Modifier.fillMaxWidth(),
+                container = container,
             )
 
             if (type == ProviderType.RELAY) {
@@ -227,19 +209,7 @@ private fun ProviderPage(vm: AliasViewModel) {
                     modifier = Modifier.fillMaxWidth(),
                 )
             } else if (showUrl) {
-                TextField(
-                    value = baseUrl,
-                    onValueChange = { baseUrl = it },
-                    colors = TextFieldDefaults.colors(
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    shape = RoundedCornerShape(16.dp),
-                    label = { Text(stringResource(R.string.self_hosted_url)) },
-                    placeholder = { Text("https://…") },
-                    singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                )
+                BaseUrlField(value = baseUrl, onValueChange = { baseUrl = it }, container = container)
             } else {
                 TextButton(onClick = { showUrl = true }) {
                     Text(stringResource(R.string.setup_self_hosted_button))
@@ -280,45 +250,6 @@ private fun ProviderPage(vm: AliasViewModel) {
                 Text(
                     stringResource(if (checking) R.string.checking_button else R.string.connect_button),
                     style = MaterialTheme.typography.titleMedium,
-                )
-            }
-        }
-    }
-}
-
-/** A read-only field that opens a menu on tap; the menu is as wide as the field. */
-@Composable
-private fun ProviderDropdown(selected: ProviderType, onSelect: (ProviderType) -> Unit) {
-    var expanded by remember { mutableStateOf(false) }
-    var fieldWidth by remember { mutableIntStateOf(0) }
-
-    Box(modifier = Modifier.fillMaxWidth().onSizeChanged { fieldWidth = it.width }) {
-        OutlinedTextField(
-            value = selected.label,
-            onValueChange = {},
-            readOnly = true,
-            label = { Text(stringResource(R.string.provider)) },
-            trailingIcon = { Icon(Icons.Default.ArrowDropDown, contentDescription = null) },
-            modifier = Modifier.fillMaxWidth(),
-        )
-        // Sits on top of the field so a tap anywhere on it opens the menu (and never focuses it).
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .clickable { expanded = true },
-        )
-        DropdownMenu(
-            expanded = expanded,
-            onDismissRequest = { expanded = false },
-            modifier = Modifier.width(with(LocalDensity.current) { fieldWidth.toDp() }),
-        ) {
-            ProviderType.entries.forEach { option ->
-                DropdownMenuItem(
-                    text = { Text(option.label) },
-                    onClick = {
-                        expanded = false
-                        onSelect(option)
-                    },
                 )
             }
         }

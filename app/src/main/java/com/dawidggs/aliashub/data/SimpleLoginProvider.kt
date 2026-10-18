@@ -152,12 +152,13 @@ class SimpleLoginProvider(
         emptyList()
     }
 
-    override suspend fun createOptions(suffixStyle: String?): CreateOptions = coroutineScope {
+    override suspend fun createOptions(suffixStyle: String?, account: AccountInfo?): CreateOptions = coroutineScope {
         // Independent requests, so run them side by side. The mailbox is only needed later by
         // create(), but fetching it now removes a round trip from the "Create" tap.
         val settingsReq = async { readSettings() }
         val domainsReq = async { randomDomains() }
-        val premiumReq = async { isPremium() }
+        // The plan is already known from the account info; only ask again when it isn't.
+        val premiumReq = async { account?.plan?.paid ?: isPremium() }
         val mailboxReq = async { prefetchMailbox() }
 
         val settings = settingsReq.await()

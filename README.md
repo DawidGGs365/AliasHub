@@ -21,6 +21,7 @@ AliasHub is an Android app that brings your email aliases from **SimpleLogin**, 
 - **Create aliases** — choose a provider and select from the domains available to your account.
 - **Multiple providers** — connect any combination of supported services.
 - **Self-hosted instances** — configure custom URLs for SimpleLogin and Addy.io.
+- **Instant start** — aliases and account details are cached on the device and shown immediately; they refresh silently in the background, and a manual refresh always fetches everything fresh.
 - **Account overview** — plan, limits and usage for each connected provider, showing only what that service's API reports.
 - **System font** — follows the device font by default; switch it off in Settings to use the app's own.
 - **Encrypted credentials** — API keys are stored encrypted on your device.

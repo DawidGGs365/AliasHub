@@ -31,8 +31,6 @@ import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.material3.SheetValue
-import androidx.compose.material3.TextField
-import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.material3.rememberBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -205,14 +203,9 @@ fun CreateAliasSheet(
                     )
                 }
                 if (showName && chosen != null) {
-                    TextField(
+                    AppTextField(
                         value = prefix,
                         onValueChange = { prefix = it },
-                        colors = TextFieldDefaults.colors(
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ),
-                        shape = RoundedCornerShape(16.dp),
                         label = {
                             Text(stringResource(if (nameRequired) R.string.name else R.string.name_optional))
                         },
@@ -231,22 +224,15 @@ fun CreateAliasSheet(
                             )
                         },
                         singleLine = true,
-                        modifier = Modifier.fillMaxWidth(),
                     )
                 }
             }
 
-            TextField(
+            AppTextField(
                 value = note,
                 onValueChange = { note = it },
-                colors = TextFieldDefaults.colors(
-                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                ),
-                shape = RoundedCornerShape(16.dp),
                 label = { Text(stringResource(R.string.note)) },
                 placeholder = { Text(stringResource(R.string.note_placeholder)) },
-                modifier = Modifier.fillMaxWidth(),
             )
 
             options?.warning?.let {
@@ -276,7 +262,7 @@ fun CreateAliasSheet(
 
 /** Read-only outlined field that opens a dropdown menu; a drop-in "select box". */
 @Composable
-private fun <T> SelectField(
+internal fun <T> SelectField(
     label: String,
     selected: T?,
     options: List<T>,

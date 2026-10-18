@@ -40,10 +40,16 @@ import com.dawidggs.aliashub.data.ProviderType
 
 /** Filled button in the error colors: the confirmation action of anything destructive. */
 @Composable
-private fun DestructiveButton(text: String, enabled: Boolean = true, onClick: () -> Unit) {
+internal fun DestructiveButton(
+    text: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    onClick: () -> Unit,
+) {
     Button(
         onClick = onClick,
         enabled = enabled,
+        modifier = modifier,
         shapes = ButtonDefaults.shapes(),
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.error,

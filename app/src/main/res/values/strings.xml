@@ -119,4 +119,6 @@
     <string name="suffix_style">Suffix style</string>
     <string name="sl_suffix_word">Random word</string>
     <string name="sl_suffix_characters">Random characters</string>
+    <string name="last_sync">Last synced %1$s</string>
+    <string name="last_sync_now">Last synced just now</string>
 </resources>

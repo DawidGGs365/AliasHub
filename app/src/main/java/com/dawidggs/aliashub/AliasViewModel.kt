@@ -3,12 +3,15 @@ package com.dawidggs.aliashub
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dawidggs.aliashub.data.AccountField
 import com.dawidggs.aliashub.data.AccountInfo
+import com.dawidggs.aliashub.data.AccountItem
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.CreateOptions
 import com.dawidggs.aliashub.data.CreateRequest
 import com.dawidggs.aliashub.data.CredentialStore
 import com.dawidggs.aliashub.data.Http
+import com.dawidggs.aliashub.data.LocalCache
 import com.dawidggs.aliashub.data.ProviderConfig
 import com.dawidggs.aliashub.data.ProviderException
 import com.dawidggs.aliashub.data.ProviderException.Kind
@@ -16,9 +19,13 @@ import com.dawidggs.aliashub.data.ProviderType
 import com.dawidggs.aliashub.data.Providers
 import com.dawidggs.aliashub.data.ThemeMode
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,7 +50,12 @@ data class UiState(
     /** Plan and usage per connected provider; missing while loading or if the call failed. */
     val accounts: Map<ProviderType, AccountInfo> = emptyMap(),
     val aliases: List<Alias> = emptyList(),
+    /** When each provider's list was last fetched successfully (epoch millis); survives restarts. */
+    val syncedAt: Map<ProviderType, Long> = emptyMap(),
+    /** A sync the user asked for (or just connected a provider) is running: drives the refresh animation. */
     val loading: Boolean = false,
+    /** Any list request is in flight, including the silent one at startup. Not shown as an animation. */
+    val syncing: Boolean = false,
     /** One message per provider that failed, so a broken one never hides the others. */
     val errors: Map<ProviderType, String> = emptyMap(),
     /** Keys of aliases with a request in flight. */
@@ -51,6 +63,13 @@ data class UiState(
     val filter: ProviderType? = null,
     val query: String = "",
 ) {
+    /**
+     * The oldest successful sync among the connected providers, so one provider that keeps
+     * failing is never hidden behind another one's fresh sync. Null until something has synced.
+     */
+    val lastSyncMillis: Long?
+        get() = configured.mapNotNull { syncedAt[it] }.minOrNull()
+
     val visible: List<Alias>
         get() = aliases.filter { a ->
             (filter == null || a.provider == filter) &&
@@ -69,7 +88,12 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     // Opening the encrypted store touches the Android Keystore, which is slow. It is created
     // lazily and first touched from an IO thread in init, so the main thread never pays for it.
     private val store by lazy { CredentialStore(app) }
-    private val cache = mutableMapOf<ProviderType, List<Alias>>()
+    // On-disk copy of aliases + account info (shown instantly on the next start). Opened off the
+    // main thread together with the credential store.
+    private val localCache by lazy { LocalCache(app) }
+
+    /** Alias list per provider: filled from disk at startup, then kept current by syncs and local actions. */
+    private val aliasCache = mutableMapOf<ProviderType, List<Alias>>()
 
     /** Providers are cheap but decrypting their key is not, so build each one once per config. */
     private val providers = ConcurrentHashMap<ProviderType, AliasProvider>()
@@ -77,8 +101,17 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     /** In-flight list request per provider; a new refresh replaces (cancels) the old one. */
     private val loads = mutableMapOf<ProviderType, Job>()
 
-    /** Same for the account info shown on the Settings cards. */
+    /** Providers in [loads] that were started silently (no refresh animation). */
+    private val quietLoads = mutableSetOf<ProviderType>()
+
+    /** Same as [loads] for the account info shown on the Settings cards. */
     private val accountLoads = mutableMapOf<ProviderType, Job>()
+
+    /** Bumped on every local change (create/delete/edit) per provider; see [fetchConsistent]. */
+    private val revisions = mutableMapOf<ProviderType, Int>()
+
+    /** Pending (debounced) write of the on-disk cache. */
+    private var persistJob: Job? = null
 
     // Not a secret, so plain preferences. It is tiny and read synchronously so the first frame
     // already has the right theme.
@@ -97,9 +130,28 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
 
     init {
         viewModelScope.launch {
-            val configured = withContext(Dispatchers.IO) { store.configuredTypes() }
-            _state.update { it.copy(initialized = true, configured = configured) }
-            refresh()
+            // Both reads are slow-ish disk/Keystore work, so do them side by side off the main thread.
+            val (configured, snapshot) = withContext(Dispatchers.IO) {
+                coroutineScope {
+                    val types = async { store.configuredTypes() }
+                    val cached = async { localCache.load() }
+                    types.await() to cached.await()
+                }
+            }
+            // Only what belongs to a still-connected provider is kept.
+            snapshot.aliases.forEach { (type, list) -> if (type in configured) aliasCache[type] = list }
+            _state.update {
+                it.copy(
+                    initialized = true,
+                    configured = configured,
+                    aliases = merged(),
+                    accounts = snapshot.accounts.filterKeys { type -> type in configured },
+                    syncedAt = snapshot.syncedAt.filterKeys { type -> type in configured },
+                )
+            }
+            // Cold start: refresh lists and (once) the account details in the background. The
+            // cached data is already on screen, so this must not show a refresh animation.
+            refresh(silent = true)
         }
     }
 
@@ -126,58 +178,128 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- loading ----------------------------------------------------------------------
 
-    /** Reloads every connected provider in parallel, or just [only]. */
-    fun refresh(only: ProviderType? = null) {
+    /**
+     * Fetches fresh data from the network for every connected provider (or just [only]): the alias
+     * list and the account details, in parallel and independent of each other. This always goes to
+     * the network, whatever is cached. [silent] (used for the startup sync) skips the refresh
+     * animation; the cached data stays on screen and is swapped in when the answer arrives.
+     */
+    fun refresh(only: ProviderType? = null, silent: Boolean = false) {
         val targets = if (only != null) listOf(only) else _state.value.configured
         if (targets.isEmpty()) return
         for (t in targets) {
-            loads.remove(t)?.cancel()
-            loads[t] = viewModelScope.launch {
-                val self = coroutineContext[Job]
-                try {
-                    val result = attempt { provider(t).list() }
-                    // The provider may have been removed while the request was in flight.
-                    if (t !in _state.value.configured) return@launch
-                    result.onSuccess { cache[t] = it }
-                    _state.update { s ->
-                        s.copy(
-                            errors = result.fold(
-                                onSuccess = { s.errors - t },
-                                onFailure = { s.errors + (t to describe(t, it)) },
-                            ),
-                            aliases = merged(),
-                        )
-                    }
-                } finally {
-                    if (loads[t] === self) loads.remove(t)
-                    _state.update { it.copy(loading = loads.isNotEmpty()) }
+            if (silent) quietLoads += t else quietLoads -= t
+            launchReplacing(loads, t, onFinished = { publishLoading() }) {
+                val result = fetchConsistent(t) { provider(t).list() }
+                // The provider may have been removed while the request was in flight.
+                if (t !in _state.value.configured) return@launchReplacing
+                result.onSuccess { aliasCache[t] = it }
+                _state.update { s ->
+                    s.copy(
+                        syncedAt = if (result.isSuccess) s.syncedAt + (t to System.currentTimeMillis()) else s.syncedAt,
+                        errors = result.fold(
+                            onSuccess = { s.errors - t },
+                            onFailure = { s.errors + (t to describe(t, it)) },
+                        ),
+                        aliases = merged(),
+                    )
                 }
+                if (result.isSuccess) persist()
             }
         }
-        // After the loop: a canceled predecessor may have already cleared the flag.
-        _state.update { it.copy(loading = loads.isNotEmpty()) }
+        // After the loop: a canceled predecessor may have already published the flags.
+        publishLoading()
+        fetchAccounts(targets)
     }
 
     /**
-     * Fetches plan and limits for every connected provider (or just [only]). Failures are ignored
-     * on purpose: this is extra information, and a real problem with the provider already shows
-     * up as the error from [refresh]. Whatever was loaded before stays on screen.
+     * Fetches plan and limits. Failures are ignored on purpose: this is extra information, and a
+     * real problem with the provider already shows up as the error from [refresh]. Whatever was
+     * loaded or cached before stays on screen. Only called from [refresh]; everything else works
+     * from the cached copy (see [commit]).
      */
-    fun refreshAccounts(only: ProviderType? = null) {
-        val targets = if (only != null) listOf(only) else _state.value.configured
-        for (t in targets) {
-            accountLoads.remove(t)?.cancel()
-            accountLoads[t] = viewModelScope.launch {
-                val self = coroutineContext[Job]
-                try {
-                    val result = attempt { provider(t).accountInfo() }
-                    if (t !in _state.value.configured) return@launch
-                    result.onSuccess { info -> _state.update { it.copy(accounts = it.accounts + (t to info)) } }
-                } finally {
-                    if (accountLoads[t] === self) accountLoads.remove(t)
+    private fun fetchAccounts(types: List<ProviderType>) {
+        for (t in types) {
+            launchReplacing(accountLoads, t) {
+                val result = fetchConsistent(t) { provider(t).accountInfo() }
+                if (t !in _state.value.configured) return@launchReplacing
+                result.onSuccess { info ->
+                    _state.update { it.copy(accounts = it.accounts + (t to info)) }
+                    persist()
                 }
             }
         }
+    }
+
+    /**
+     * Runs a sync request, and runs it again if a local change to [type] landed while it was in
+     * flight: an answer that predates that change would otherwise undo it (a just-created alias
+     * disappearing, a counter off by one). Failures are returned as they are.
+     */
+    private suspend fun <T> fetchConsistent(type: ProviderType, call: suspend () -> T): Result<T> {
+        while (true) {
+            val revision = revisions[type] ?: 0
+            val result = attempt { call() }
+            if (result.isFailure || (revisions[type] ?: 0) == revision) return result
+        }
+    }
+
+    /** Starts [block] as the one job for [type] in [jobs], cancelling the previous one. */
+    private fun launchReplacing(
+        jobs: MutableMap<ProviderType, Job>,
+        type: ProviderType,
+        onFinished: () -> Unit = {},
+        block: suspend () -> Unit,
+    ) {
+        jobs.remove(type)?.cancel()
+        // Lazy, so the job is in the map before its body can possibly finish.
+        val job = viewModelScope.launch(start = CoroutineStart.LAZY) {
+            val self = coroutineContext[Job]
+            try {
+                block()
+            } finally {
+                if (jobs[type] === self) jobs.remove(type)
+                onFinished()
+            }
+        }
+        jobs[type] = job
+        job.start()
+    }
+
+    private fun publishLoading() {
+        quietLoads.retainAll(loads.keys)
+        _state.update {
+            it.copy(
+                loading = loads.keys.any { t -> t !in quietLoads },
+                syncing = loads.isNotEmpty(),
+            )
+        }
+    }
+
+    /** Writes the cache to disk shortly after the last change, so a burst of changes is one write. */
+    private fun persist() {
+        persistJob?.cancel()
+        persistJob = viewModelScope.launch {
+            delay(PERSIST_DELAY_MS)
+            val snapshot = LocalCache.Snapshot(aliasCache.toMap(), _state.value.accounts, _state.value.syncedAt)
+            // Not cancellable: once the write has started it should finish.
+            withContext(Dispatchers.IO + NonCancellable) { localCache.save(snapshot) }
+        }
+    }
+
+    /**
+     * Publishes [aliasCache] after a local change and keeps the account's alias counter in step
+     * ([countDelta] = +1 for a created alias, -1 for a deleted one) without asking the API again.
+     */
+    private fun commit(type: ProviderType, countDelta: Int = 0) {
+        revisions[type] = (revisions[type] ?: 0) + 1
+        _state.update { s ->
+            s.copy(
+                aliases = merged(),
+                accounts = if (countDelta == 0) s.accounts else s.accounts.withAliasDelta(type, countDelta),
+            )
+        }
+        persist()
     }
 
     // ---- provider setup -----------------------------------------------------------------
@@ -213,8 +335,8 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         }
         providers.remove(type)
         _state.update { it.copy(configured = configured, errors = it.errors - type) }
+        // Visible on purpose: the user just connected this provider and is waiting for its aliases.
         refresh(type)
-        refreshAccounts(type)
         return null
     }
 
@@ -222,24 +344,27 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         store.clear(type)
         providers.remove(type)
         loads.remove(type)?.cancel()
-        cache.remove(type)
+        aliasCache.remove(type)
         accountLoads.remove(type)?.cancel()
         _state.update {
             it.copy(
                 accounts = it.accounts - type,
+                syncedAt = it.syncedAt - type,
                 configured = store.configuredTypes(),
                 errors = it.errors - type,
                 aliases = merged(),
                 filter = if (it.filter == type) null else it.filter,
             )
         }
+        publishLoading()
+        persist()
     }
 
     // ---- alias actions --------------------------------------------------------------------
 
     /** Domains/suffixes the provider currently offers, or an error message. Fetched per dialog open. */
     suspend fun createOptions(type: ProviderType, suffixStyle: String? = null): Pair<CreateOptions?, String?> {
-        val result = attempt { provider(type).createOptions(suffixStyle) }
+        val result = attempt { provider(type).createOptions(suffixStyle, _state.value.accounts[type]) }
         return result.getOrNull() to result.exceptionOrNull()?.let { describe(type, it) }
     }
 
@@ -247,8 +372,9 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             attempt { provider(type).create(spec) }
                 .onSuccess {
-                    cache[type] = listOf(it) + cache[type].orEmpty()
-                    _state.update { s -> s.copy(aliases = merged()) }
+                    // A sync that finished first may already contain the new alias; never list it twice.
+                    aliasCache[type] = listOf(it) + aliasCache[type].orEmpty().filter { a -> a.id != it.id }
+                    commit(type, countDelta = +1)
                     say(context.getString(R.string.vm_alias_created, it.address), copy = it.address)
                 }
                 .onFailure { say(describe(type, it)) }
@@ -266,8 +392,8 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             attempt { provider(alias.provider).delete(alias) }
                 .onSuccess {
-                    cache[alias.provider] = cache[alias.provider].orEmpty().filter { a -> a.id != alias.id }
-                    _state.update { s -> s.copy(aliases = merged()) }
+                    aliasCache[alias.provider] = aliasCache[alias.provider].orEmpty().filter { a -> a.id != alias.id }
+                    commit(alias.provider, countDelta = -1)
                     say(context.getString(R.string.vm_alias_deleted, alias.address))
                 }
                 .onFailure { say(describe(alias.provider, it)) }
@@ -289,9 +415,9 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             attempt { op() }
                 .onSuccess { updated ->
-                    cache[updated.provider] = cache[updated.provider].orEmpty()
+                    aliasCache[updated.provider] = aliasCache[updated.provider].orEmpty()
                         .map { a -> if (a.id == updated.id) updated else a }
-                    _state.update { s -> s.copy(aliases = merged()) }
+                    commit(updated.provider)
                 }
                 .onFailure { say(describe(alias.provider, it)) }
             setBusy(alias.key, false)
@@ -305,12 +431,12 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         providers[type] ?: withContext(Dispatchers.IO) {
             val config = store.get(type)
                 ?: throw ProviderException(Kind.AUTH, context.getString(R.string.vm_not_connected))
-            Providers.create(type, config, getApplication())
+            Providers.create(type, config, context)
                 .also { providers[type] = it }
         }
 
     private fun merged(): List<Alias> =
-        cache.values.flatten().sortedByDescending { it.createdAtMillis ?: 0L }
+        aliasCache.values.flatten().sortedByDescending { it.createdAtMillis ?: 0L }
 
     private fun say(text: String, copy: String? = null) {
         _messages.trySend(Message(text, copy))
@@ -350,5 +476,22 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     private companion object {
         const val KEY_THEME = "theme_mode"
         const val KEY_SYSTEM_FONT = "system_font"
+        const val PERSIST_DELAY_MS = 400L
     }
+}
+
+/**
+ * The accounts with [type]'s alias counter moved by [delta] (never below 0). Providers without
+ * a known counter, or accounts not loaded yet, are left as they are.
+ */
+private fun Map<ProviderType, AccountInfo>.withAliasDelta(type: ProviderType, delta: Int): Map<ProviderType, AccountInfo> {
+    val info = this[type] ?: return this
+    val items = info.items.map { item ->
+        if (item is AccountItem.Count && item.field == AccountField.ALIASES) {
+            item.copy(used = (item.used + delta).coerceAtLeast(0))
+        } else {
+            item
+        }
+    }
+    return this + (type to info.copy(items = items))
 }
