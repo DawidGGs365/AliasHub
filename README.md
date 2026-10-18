@@ -5,9 +5,8 @@
 AliasHub is an Android app that brings your email aliases from **SimpleLogin**, **Addy.io** and **Firefox Relay** together in one place. Search, create and manage your aliases without switching between apps or websites.
 
 <p align="center">
-  <img src="screenshots/simplelogin_integration.jpg" width="32%" alt="SimpleLogin integration">
-  <img src="screenshots/addy_integration.jpg" width="32%" alt="Addy.io integration">
-  <img src="screenshots/relay_integration.jpg" width="32%" alt="Firefox Relay integration">
+  <img src="screenshots/homescreen.jpg" width="32%" alt="Home screen">
+  <img src="screenshots/settings.jpg" width="32%" alt="Settings screen">
 </p>
 
 <p align="center">
