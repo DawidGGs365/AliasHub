@@ -71,6 +71,8 @@ data class CreateRequest(
     val prefix: String,
     /** One of [CreateOptions.generators]; null means the provider's own default. */
     val generatorId: String? = null,
+    /** SimpleLogin suffix style chosen in the sheet (applies to every generator); null keeps the account's own. */
+    val suffixStyle: String? = null,
 )
 
 /** The one alias shape the whole UI works with, whichever service it came from. */

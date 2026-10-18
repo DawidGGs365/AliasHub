@@ -110,20 +110,25 @@ class AddyProvider(
                 // the domain list.
                 val usernameReq = async { accountSettings() }
                 val text = request("/domain-options").send()
-                val (domains, preferred) = Http.parsing {
+                val (domains, preferred, optionsFormat) = Http.parsing {
                     val root = JSONObject(text)
                     val arr = root.optJSONArray("data") ?: JSONArray()
                     val names = List(arr.length()) { i ->
                         val v = arr.get(i)
                         if (v is JSONObject) v.str("domain") else v.toString()
                     }.filter { it.isNotBlank() }
-                    names to root.str("defaultAliasDomain").ifBlank { null }
+                    Triple(
+                        names,
+                        root.str("defaultAliasDomain").ifBlank { null },
+                        root.str("defaultAliasFormat").ifBlank { null },
+                    )
                 }
                 if (domains.isEmpty()) {
                     usernameReq.cancel()
                     fallback(context.getString(R.string.addy_empty_response))
                 } else {
-                    val (username, defaultFormat) = usernameReq.await()
+                    val (username, defaultFormat, subscription) = usernameReq.await()
+                    val free = subscription.equals("free", ignoreCase = true)
                     CreateOptions(
                         domains = domains.map { d ->
                             // Username domains (name.anonaddy.com) only accept a custom name;
@@ -132,14 +137,19 @@ class AddyProvider(
                             DomainOption(
                                 id = d,
                                 label = d,
-                                needsPrefix = usernameDomain || d.lowercase() in OPTIONAL_NAME_DOMAINS,
+                                // Free accounts cannot name aliases on the shared domains (paid-only), so no name there.
+                                needsPrefix = usernameDomain || (!free && d.lowercase() in OPTIONAL_NAME_DOMAINS),
                                 prefixRequired = usernameDomain,
                                 joiner = "@",
                             )
                         },
                         defaultId = preferred?.takeIf { it in domains } ?: domains.first(),
-                        generators = generators(),
-                        defaultGeneratorId = defaultFormat?.takeIf { f -> f in FORMATS } ?: FORMATS.first(),
+                        generators = generators(free),
+                        // /domain-options reports the account's default format; /account-details is the
+                        // backup. Only when neither is readable is random characters assumed.
+                        defaultGeneratorId = (optionsFormat ?: defaultFormat)
+                            ?.takeIf { f -> f in FORMATS && !(free && f in PAID_FORMATS) }
+                            ?: FORMATS.first(),
                     )
                 }
             }
@@ -153,19 +163,27 @@ class AddyProvider(
      * The account's username (to recognize its own subdomains) and its default alias format.
      * Both are null if they can't be read.
      */
-    private suspend fun accountSettings(): Pair<String?, String?> = try {
+    private suspend fun accountSettings(): Triple<String?, String?, String?> = try {
         val text = request("/account-details").send()
         Http.parsing {
             val d = JSONObject(text).getJSONObject("data")
-            d.str("username").ifBlank { null } to d.str("default_alias_format").ifBlank { null }
+            Triple(
+                d.str("username").ifBlank { null },
+                d.str("default_alias_format").ifBlank { null },
+                d.str("subscription").ifBlank { null },
+            )
         }
     } catch (e: ProviderException) {
         if (e.kind == ProviderException.Kind.AUTH) throw e
-        null to null
+        Triple(null, null, null)
     }
 
     /** Every format the create endpoint accepts; "custom" is the only one that takes a name. */
-    private fun generators(): List<GeneratorOption> = FORMATS.map { f ->
+    private fun generators(free: Boolean = false): List<GeneratorOption> = FORMATS
+        // addy.io only accepts words / names / nouns on paid plans (the server answers 422
+        // "selected format is invalid"), so a free account isn't offered them.
+        .filter { f -> !free || f !in PAID_FORMATS }
+        .map { f ->
         GeneratorOption(
             id = f,
             label = context.getString(
@@ -261,6 +279,7 @@ class AddyProvider(
             "random_characters", "uuid", "random_words",
             "random_male_name", "random_female_name", "random_noun", "custom",
         )
+        val PAID_FORMATS = setOf("random_words", "random_male_name", "random_female_name", "random_noun")
         val FALLBACK_DOMAINS = listOf("anonaddy.me", "anonaddy.com")
 
         /** Shared domains where a custom name is optional (blank = random characters). */

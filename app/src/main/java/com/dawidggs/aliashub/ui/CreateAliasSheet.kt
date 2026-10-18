@@ -109,14 +109,20 @@ fun CreateAliasSheet(
     // names (Addy usernames) leaves "custom" as the one choice. Without generators (Relay) the
     // old per-domain rules apply.
     val allGenerators = options?.generators.orEmpty()
-    val generators = if (chosen?.prefixRequired == true) allGenerators.filter { it.takesName } else allGenerators
+    // A domain that takes no name (Addy shared domains on a free plan) can't use the custom generator.
+    val generators = when {
+        chosen?.prefixRequired == true -> allGenerators.filter { it.takesName }
+        chosen != null && !chosen.needsPrefix -> allGenerators.filter { !it.takesName }.ifEmpty { allGenerators }
+        else -> allGenerators
+    }
     val generator: GeneratorOption? = generators.firstOrNull { it.id == generatorId } ?: generators.firstOrNull()
     val randomMode = generator?.randomDomain == true
     val activeDomains = if (randomMode) options?.randomDomains.orEmpty() else domains
     val activeDomainId = if (randomMode) randomDomainId else domainId
     val showDomain = activeDomains.size > 1 && (generator?.takesDomain ?: true)
     val styles = options?.suffixStyles.orEmpty()
-    val showStyle = generator?.takesName == true && styles.size > 1
+    // UUID aliases are generated whole by the server and never have a suffix, so no style there.
+    val showStyle = styles.size > 1 && generator?.id != "uuid"
     val showName = generator?.takesName ?: (chosen?.needsPrefix == true)
     val nameRequired = generator?.takesName ?: (chosen?.prefixRequired == true)
     val nameMissing = nameRequired && prefix.isBlank()
@@ -178,6 +184,7 @@ fun CreateAliasSheet(
                         optionLabel = { it.label },
                         onSelect = { picked ->
                             if (picked.id != styleId && !reloading) {
+                                val previous = styleId
                                 styleId = picked.id
                                 reloading = true
                                 scope.launch {
@@ -187,6 +194,8 @@ fun CreateAliasSheet(
                                         options = loaded
                                         domainId = loaded.defaultId
                                         styleId = loaded.suffixStyleId
+                                    } else {
+                                        styleId = previous // keep the shown style in sync with the loaded suffixes
                                     }
                                     loadError = error
                                     reloading = false
@@ -257,7 +266,7 @@ fun CreateAliasSheet(
                 onClick = {
                     // A name typed for one domain must not leak into a domain that doesn't use one.
                     val name = if (showName) prefix.trim() else ""
-                    onCreate(provider, CreateRequest(note.trim(), activeDomainId, name, generator?.id))
+                    onCreate(provider, CreateRequest(note.trim(), activeDomainId, name, generator?.id, styleId.takeIf { showStyle }))
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.create_button)) }

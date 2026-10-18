@@ -106,20 +106,30 @@ class SimpleLoginProvider(
 
     /**
      * The API has no per-request choice for the suffix style or the domain of random aliases, only
-     * these account settings. So the wanted value is applied just for [block] and the previous
-     * one is put back right after, even if [block] fails. Does nothing when the value is already
-     * set or the current one is unknown (then there would be nothing to restore).
+     * these account settings. So the wanted values are applied just for [block] and the previous
+     * ones are put back right after (in one PATCH each way), even if [block] fails. Keys whose
+     * value is already set, or whose current value is unknown (nothing to restore), are skipped.
      */
-    private suspend fun <T> withSetting(key: String, wanted: String?, current: String?, block: suspend () -> T): T {
-        if (wanted.isNullOrBlank() || current.isNullOrBlank() || wanted == current) return block()
+    private suspend fun <T> withSettings(
+        wanted: Map<String, String?>,
+        current: JSONObject?,
+        block: suspend () -> T,
+    ): T {
+        val change = wanted.mapNotNull { (key, value) ->
+            val old = current?.str(key)?.ifBlank { null }
+            if (value.isNullOrBlank() || old == null || value == old) null else Triple(key, value, old)
+        }
+        if (change.isEmpty()) return block()
         return settingsLock.withLock {
-            request("/api/setting").send("PATCH", Http.jsonBody(JSONObject().put(key, wanted)))
+            val apply = JSONObject().also { o -> change.forEach { (k, v, _) -> o.put(k, v) } }
+            val restore = JSONObject().also { o -> change.forEach { (k, _, old) -> o.put(k, old) } }
+            request("/api/setting").send("PATCH", Http.jsonBody(apply))
             try {
                 block()
             } finally {
                 withContext(NonCancellable) {
                     try {
-                        request("/api/setting").send("PATCH", Http.jsonBody(JSONObject().put(key, current)))
+                        request("/api/setting").send("PATCH", Http.jsonBody(restore))
                     } catch (e: ProviderException) {
                         // Best effort: nothing more can be done from here.
                     }
@@ -154,7 +164,7 @@ class SimpleLoginProvider(
         val currentStyle = settings?.str("random_alias_suffix")?.ifBlank { null }
         // The suffix list depends only on the account's suffix setting, so ask for another style
         // by switching that setting for the duration of this one call.
-        val optionsText = withSetting("random_alias_suffix", suffixStyle, currentStyle) {
+        val optionsText = withSettings(mapOf("random_alias_suffix" to suffixStyle), settings) {
             request("/api/v5/alias/options").send()
         }
         val root = Http.parsing { JSONObject(optionsText) }
@@ -171,7 +181,11 @@ class SimpleLoginProvider(
                 val signed = s.str("signed_suffix").ifBlank { s.str("signed-suffix") }
                 if (signed.isBlank()) continue
                 if (s.optBoolean("is_premium", false) && !premium) continue
-                out += DomainOption(id = signed, label = s.str("suffix"), needsPrefix = true)
+                // "suffix" looks like ".xk3d9@domain.com". The generated part is hidden on purpose,
+                // so only the domain is shown (same as the random modes' domain list).
+                val raw = s.str("suffix")
+                val domain = if ('@' in raw) raw.substringAfter('@') else raw
+                out += DomainOption(id = signed, label = domain, needsPrefix = true, joiner = "@")
             }
             out
         }
@@ -246,15 +260,15 @@ class SimpleLoginProvider(
             else -> path = "/api/alias/random/new"
         }
         val isRandom = spec.generatorId != CUSTOM_ID
-        val text = if (isRandom && !spec.domainId.isNullOrBlank()) {
+        val wanted = mapOf(
             // Random aliases land on the account's default random domain, so switch it for this call.
-            val current = readSettings()?.str("random_alias_default_domain")
-            withSetting("random_alias_default_domain", spec.domainId, current) {
-                request(path).send("POST", Http.jsonBody(body))
-            }
-        } else {
-            request(path).send("POST", Http.jsonBody(body))
-        }
+            "random_alias_default_domain" to spec.domainId.takeIf { isRandom },
+            // The chosen suffix style applies whichever generator is used.
+            "random_alias_suffix" to spec.suffixStyle,
+        )
+        // Only read the settings when there is something to switch.
+        val current = if (wanted.values.any { !it.isNullOrBlank() }) readSettings() else null
+        val text = withSettings(wanted, current) { request(path).send("POST", Http.jsonBody(body)) }
         return Http.parsing { parse(JSONObject(text)) }
     }
 
