@@ -41,6 +41,8 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import kotlinx.coroutines.launch
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,6 +55,7 @@ import com.dawidggs.aliashub.R
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.CreateOptions
 import com.dawidggs.aliashub.data.CreateRequest
+import com.dawidggs.aliashub.data.GeneratorOption
 import com.dawidggs.aliashub.data.ProviderType
 
 /**
@@ -63,7 +66,7 @@ import com.dawidggs.aliashub.data.ProviderType
 @Composable
 fun CreateAliasSheet(
     provider: ProviderType,
-    loadOptions: suspend (ProviderType) -> Pair<CreateOptions?, String?>,
+    loadOptions: suspend (ProviderType, String?) -> Pair<CreateOptions?, String?>,
     onDismiss: () -> Unit,
     onCreate: (ProviderType, CreateRequest) -> Unit,
 ) {
@@ -73,6 +76,12 @@ fun CreateAliasSheet(
     var loadError by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(true) }
     var domainId by remember { mutableStateOf<String?>(null) }
+    var generatorId by remember { mutableStateOf<String?>(null) }
+    // Random aliases pick from their own domain list (SimpleLogin), custom ones from [domainId].
+    var randomDomainId by remember { mutableStateOf<String?>(null) }
+    var styleId by remember { mutableStateOf<String?>(null) }
+    var reloading by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
 
     // Options depend on the account and (SimpleLogin) carry fresh signed values, so they are
     // fetched every time the sheet opens.
@@ -81,16 +90,38 @@ fun CreateAliasSheet(
         options = null
         loadError = null
         domainId = null
-        val (loaded, error) = loadOptions(provider)
+        generatorId = null
+        randomDomainId = null
+        styleId = null
+        val (loaded, error) = loadOptions(provider, null)
         options = loaded
         loadError = error
         domainId = loaded?.defaultId ?: loaded?.domains?.firstOrNull()?.id
+        generatorId = loaded?.defaultGeneratorId
+        randomDomainId = loaded?.defaultRandomDomainId
+        styleId = loaded?.suffixStyleId
         loading = false
     }
 
     val domains = options?.domains.orEmpty()
     val chosen = domains.firstOrNull { it.id == domainId }
-    val nameMissing = chosen?.prefixRequired == true && prefix.isBlank()
+
+    // Providers with several ways to name an alias (generators) get a "Generator" select; the
+    // domain and name fields then follow the chosen generator. A domain that only accepts custom
+    // names (Addy usernames) leaves "custom" as the one choice. Without generators (Relay) the
+    // old per-domain rules apply.
+    val allGenerators = options?.generators.orEmpty()
+    val generators = if (chosen?.prefixRequired == true) allGenerators.filter { it.takesName } else allGenerators
+    val generator: GeneratorOption? = generators.firstOrNull { it.id == generatorId } ?: generators.firstOrNull()
+    val randomMode = generator?.randomDomain == true
+    val activeDomains = if (randomMode) options?.randomDomains.orEmpty() else domains
+    val activeDomainId = if (randomMode) randomDomainId else domainId
+    val showDomain = activeDomains.size > 1 && (generator?.takesDomain ?: true)
+    val styles = options?.suffixStyles.orEmpty()
+    val showStyle = generator?.takesName == true && styles.size > 1
+    val showName = if (generator != null) generator.takesName else chosen?.needsPrefix == true
+    val nameRequired = if (generator != null) generator.takesName else chosen?.prefixRequired == true
+    val nameMissing = nameRequired && prefix.isBlank()
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -123,16 +154,50 @@ fun CreateAliasSheet(
                     LoadingIndicator()
                 }
             } else {
-                if (domains.size > 1) {
+                if (generators.size > 1) {
                     SelectField(
-                        label = stringResource(R.string.domain),
-                        selected = chosen,
-                        options = domains,
+                        label = stringResource(R.string.generator),
+                        selected = generator,
+                        options = generators,
                         optionLabel = { it.label },
-                        onSelect = { domainId = it.id },
+                        onSelect = { generatorId = it.id },
                     )
                 }
-                if (chosen?.needsPrefix == true) {
+                if (showDomain) {
+                    SelectField(
+                        label = stringResource(R.string.domain),
+                        selected = activeDomains.firstOrNull { it.id == activeDomainId },
+                        options = activeDomains,
+                        optionLabel = { it.label },
+                        onSelect = { if (randomMode) randomDomainId = it.id else domainId = it.id },
+                    )
+                }
+                if (showStyle) {
+                    SelectField(
+                        label = stringResource(R.string.suffix_style),
+                        selected = styles.firstOrNull { it.id == styleId },
+                        options = styles,
+                        optionLabel = { it.label },
+                        onSelect = { picked ->
+                            if (picked.id != styleId && !reloading) {
+                                styleId = picked.id
+                                reloading = true
+                                scope.launch {
+                                    // The suffixes are generated server-side per style, so fetch them again.
+                                    val (loaded, error) = loadOptions(provider, picked.id)
+                                    if (loaded != null) {
+                                        options = loaded
+                                        domainId = loaded.defaultId
+                                        styleId = loaded.suffixStyleId
+                                    }
+                                    loadError = error
+                                    reloading = false
+                                }
+                            }
+                        },
+                    )
+                }
+                if (showName && chosen != null) {
                     TextField(
                         value = prefix,
                         onValueChange = { prefix = it },
@@ -142,7 +207,7 @@ fun CreateAliasSheet(
                         ),
                         shape = RoundedCornerShape(16.dp),
                         label = {
-                            Text(stringResource(if (chosen.prefixRequired) R.string.name else R.string.name_optional))
+                            Text(stringResource(if (nameRequired) R.string.name else R.string.name_optional))
                         },
                         supportingText = {
                             Text(
@@ -189,12 +254,12 @@ fun CreateAliasSheet(
             }
 
             Button(
-                enabled = !loading && !nameMissing,
+                enabled = !loading && !reloading && !nameMissing,
                 shapes = ButtonDefaults.shapes(),
                 onClick = {
                     // A name typed for one domain must not leak into a domain that doesn't use one.
-                    val name = if (chosen?.needsPrefix == true) prefix.trim() else ""
-                    onCreate(provider, CreateRequest(note.trim(), domainId, name))
+                    val name = if (showName) prefix.trim() else ""
+                    onCreate(provider, CreateRequest(note.trim(), activeDomainId, name, generator?.id))
                 },
                 modifier = Modifier.fillMaxWidth(),
             ) { Text(stringResource(R.string.create_button)) }
@@ -231,6 +296,7 @@ private fun <T> SelectField(
         DropdownMenu(
             expanded = expanded,
             onDismissRequest = { expanded = false },
+            shape = RoundedCornerShape(20.dp),
             modifier = Modifier
                 .width(with(density) { widthPx.toDp() })
                 .heightIn(max = 320.dp),
@@ -249,15 +315,4 @@ private fun <T> SelectField(
             }
         }
     }
-}
-
-@Composable
-fun ConfirmDeleteDialog(alias: Alias, onDismiss: () -> Unit, onConfirm: () -> Unit) {
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(stringResource(R.string.delete_alias_confirmation)) },
-        text = { Text(stringResource(R.string.delete_alias_warning_text, alias.address)) },
-        confirmButton = { TextButton(onClick = onConfirm) { Text(stringResource(R.string.delete_button)) } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text(stringResource(R.string.cancel_button)) } },
-    )
 }

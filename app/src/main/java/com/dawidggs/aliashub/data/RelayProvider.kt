@@ -33,8 +33,51 @@ class RelayProvider(private val config: ProviderConfig) : AliasProvider {
         }
     }
 
+    /**
+     * `/profiles/` is a one-element list with the plan flags and totals. The free mask cap is not
+     * in the profile; it comes from the public `/runtime_data` (`MAX_NUM_FREE_ALIASES`) and is
+     * only shown for free accounts. If that call fails the count is shown without a cap.
+     */
+    override suspend fun accountInfo(): AccountInfo {
+        val profileText = request("/profiles/").send()
+        val p = Http.parsing {
+            val t = profileText.trim()
+            val arr = if (t.startsWith("[")) JSONArray(t) else JSONObject(t).getJSONArray("results")
+            arr.getJSONObject(0)
+        }
+        val premium = p.optBoolean("has_premium", false)
+
+        val freeCap = if (premium) null else try {
+            val text = request("/runtime_data/").send()
+            Http.parsing { JSONObject(text).longOrNull("MAX_NUM_FREE_ALIASES") }
+        } catch (e: ProviderException) {
+            if (e.kind == ProviderException.Kind.AUTH) throw e
+            null
+        }
+
+        val features = buildList {
+            if (p.optBoolean("has_phone", false)) add(PlanFeature.PHONE)
+            if (p.optBoolean("has_vpn", false)) add(PlanFeature.VPN)
+            if (p.optBoolean("has_megabundle", false)) add(PlanFeature.BUNDLE)
+        }
+        val items = mutableListOf<AccountItem>()
+        p.str("subdomain").takeIf { it.isNotBlank() }?.let { items += AccountItem.Text(AccountField.SUBDOMAIN, it) }
+        p.longOrNull("total_masks")?.let { items += AccountItem.Count(AccountField.ALIASES, it, limit = freeCap) }
+        p.longOrNull("emails_forwarded")?.let { items += AccountItem.Count(AccountField.FORWARDED, it) }
+        p.longOrNull("emails_blocked")?.let { items += AccountItem.Count(AccountField.BLOCKED, it) }
+        p.longOrNull("emails_replied")?.let { items += AccountItem.Count(AccountField.REPLIED, it) }
+        return AccountInfo(
+            plan = AccountPlan(
+                paid = premium,
+                sinceMillis = parseMillis(p.str("date_subscribed")),
+                features = features,
+            ),
+            items = items,
+        )
+    }
+
     // Relay masks have no domain or name to choose.
-    override suspend fun createOptions() = CreateOptions(domains = emptyList(), defaultId = null)
+    override suspend fun createOptions(suffixStyle: String?) = CreateOptions(domains = emptyList(), defaultId = null)
 
     override suspend fun create(spec: CreateRequest): Alias {
         val body = JSONObject().apply { if (spec.note.isNotBlank()) put("description", spec.note) }

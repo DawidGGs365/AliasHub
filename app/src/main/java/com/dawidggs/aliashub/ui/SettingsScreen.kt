@@ -39,10 +39,25 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
+import android.text.format.Formatter
+import java.text.DateFormat
+import java.util.Date
+import com.dawidggs.aliashub.data.AccountField
+import com.dawidggs.aliashub.data.AccountInfo
+import com.dawidggs.aliashub.data.AccountItem
+import com.dawidggs.aliashub.data.AccountPlan
+import com.dawidggs.aliashub.data.PlanFeature
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,6 +79,9 @@ import com.dawidggs.aliashub.R
 @Composable
 fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
     val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    // Plan and usage can change on the provider's side, so reload them each time Settings opens.
+    LaunchedEffect(Unit) { vm.refreshAccounts() }
+    var removeFor by remember { mutableStateOf<ProviderType?>(null) }
     Scaffold(
         modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
         topBar = {
@@ -92,7 +110,11 @@ fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
             itemsIndexed(providers) { index, type ->
                 val shapes = ListItemDefaults.segmentedShapes(index = index, count = providers.size)
                 if (type in state.configured) {
-                    ConnectedItem(type, shapes, onRemove = { vm.removeProvider(type) })
+                    ConnectedItem(
+                        type, shapes, state.accounts[type],
+                        onManage = { vm.dashboardUrl(type) },
+                        onRemove = { removeFor = type },
+                    )
                 } else {
                     ConnectItem(type, shapes, onConnect = { token, baseUrl ->
                         vm.saveConfig(type, token, baseUrl)
@@ -100,43 +122,215 @@ fun SettingsScreen(state: UiState, vm: AliasViewModel, onClose: (() -> Unit)?) {
                 }
             }
             if (onClose != null) {
+                // Appearance group: theme and font sit together as one segmented list.
                 item {
                     ThemeItem(
                         selected = state.themeMode,
                         onSelect = vm::setThemeMode,
+                        shapes = ListItemDefaults.segmentedShapes(index = 0, count = 2),
                         modifier = Modifier.padding(top = 16.dp),
+                    )
+                }
+                item {
+                    FontItem(
+                        systemFont = state.systemFont,
+                        onChange = vm::setSystemFont,
+                        shapes = ListItemDefaults.segmentedShapes(index = 1, count = 2),
                     )
                 }
             }
         }
     }
+    removeFor?.let { type ->
+        ConfirmRemoveProviderDialog(
+            type = type,
+            onDismiss = { removeFor = null },
+            onConfirm = {
+                removeFor = null
+                vm.removeProvider(type)
+            },
+        )
+    }
 }
 
-/** A connected provider is just its name and a way to disconnect it. */
+/**
+ * A connected provider: name, then the account info and the two actions, all at the card's full
+ * width (the list item's leading/trailing slots would squeeze the details, so they aren't used).
+ */
 @Composable
-private fun ConnectedItem(type: ProviderType, shapes: ListItemShapes, onRemove: () -> Unit) {
+private fun ConnectedItem(
+    type: ProviderType,
+    shapes: ListItemShapes,
+    account: AccountInfo?,
+    onManage: () -> String,
+    onRemove: () -> Unit,
+) {
+    val uriHandler = LocalUriHandler.current
     SegmentedListItem(
         shapes = shapes,
         colors = groupedItemColors(),
-        leadingContent = {
-            Icon(
-                painter = providerIcon(type),
-                contentDescription = null,
-                modifier = Modifier.size(32.dp),
-            )
-        },
-        trailingContent = {
-            Button(onClick = onRemove, shapes = ButtonDefaults.shapes()) {
-                Text(stringResource(R.string.remove_button))
+        contentPadding = PaddingValues(16.dp),
+        supportingContent = {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(top = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (account != null) AccountDetails(account)
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    FilledTonalButton(
+                        onClick = {
+                            // No browser installed is rare, but must not crash the app.
+                            runCatching { uriHandler.openUri(onManage()) }
+                        },
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.manage_account_button))
+                    }
+                    Button(
+                        onClick = onRemove,
+                        shapes = ButtonDefaults.shapes(),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = MaterialTheme.colorScheme.error,
+                            contentColor = MaterialTheme.colorScheme.onError,
+                        ),
+                        modifier = Modifier.weight(1f),
+                    ) {
+                        Text(stringResource(R.string.remove_button))
+                    }
+                }
             }
         },
         content = {
-            Text(
-                stringResource(R.string.provider_connected, type.label),
-                style = MaterialTheme.typography.titleMedium,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    painter = providerIcon(type),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp),
+                )
+                Spacer(Modifier.width(16.dp))
+                Text(
+                    stringResource(R.string.provider_connected, type.label),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+            }
         },
     )
+}
+
+/** Plan line, then one row per fact the provider reported; nothing is shown for what it didn't. */
+@Composable
+private fun AccountDetails(info: AccountInfo) {
+    val context = LocalContext.current
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(6.dp),
+    ) {
+        info.plan?.let { plan ->
+            Text(
+                planText(plan),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+        info.items.forEach { item ->
+            AccountRow(
+                label = stringResource(fieldLabel(item.field)),
+                value = itemValue(context, item),
+                progress = itemProgress(item),
+            )
+        }
+    }
+}
+
+@Composable
+private fun AccountRow(label: String, value: String, progress: Float?) {
+    Column(Modifier.fillMaxWidth()) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(label, style = MaterialTheme.typography.bodySmall)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                value,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.End,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (progress != null) {
+            LinearProgressIndicator(
+                progress = { progress },
+                modifier = Modifier.fillMaxWidth().padding(top = 2.dp),
+            )
+        }
+    }
+}
+
+@Composable
+private fun planText(plan: AccountPlan): String {
+    val date = { millis: Long -> DateFormat.getDateInstance(DateFormat.MEDIUM).format(Date(millis)) }
+    val name = plan.name?.replaceFirstChar { it.uppercase() }
+        ?: stringResource(if (plan.paid) R.string.plan_premium else R.string.plan_free)
+    val parts = mutableListOf<String>()
+    parts += if (plan.trial) stringResource(R.string.plan_trial, name) else name
+    plan.features.forEach { parts += stringResource(featureLabel(it)) }
+    plan.endsAtMillis?.let {
+        parts += stringResource(if (plan.trial) R.string.plan_trial_ends else R.string.plan_ends, date(it))
+    }
+    plan.sinceMillis?.let { parts += stringResource(R.string.plan_since, date(it)) }
+    return parts.joinToString(" · ")
+}
+
+private fun itemValue(context: android.content.Context, item: AccountItem): String {
+    fun count(n: Long) = java.text.NumberFormat.getIntegerInstance().format(n)
+    fun bytes(n: Long) = Formatter.formatShortFileSize(context, n)
+    return when (item) {
+        is AccountItem.Text -> item.value
+        is AccountItem.Count -> when {
+            item.limit != null -> context.getString(R.string.usage_of, count(item.used), count(item.limit))
+            item.unlimited -> context.getString(R.string.usage_unlimited, count(item.used))
+            else -> count(item.used)
+        }
+        is AccountItem.Bytes -> when {
+            item.limit != null -> context.getString(R.string.usage_of, bytes(item.used), bytes(item.limit))
+            item.unlimited -> context.getString(R.string.usage_unlimited, bytes(item.used))
+            else -> bytes(item.used)
+        }
+    }
+}
+
+/** A bar only where there is a known cap to measure against. */
+private fun itemProgress(item: AccountItem): Float? {
+    val (used, limit) = when (item) {
+        is AccountItem.Count -> item.used to item.limit
+        is AccountItem.Bytes -> item.used to item.limit
+        is AccountItem.Text -> return null
+    }
+    return limit?.takeIf { it > 0 }?.let { (used.toFloat() / it).coerceIn(0f, 1f) }
+}
+
+private fun fieldLabel(field: AccountField): Int = when (field) {
+    AccountField.EMAIL -> R.string.account_email
+    AccountField.USERNAME -> R.string.account_username
+    AccountField.SUBDOMAIN -> R.string.account_subdomain
+    AccountField.ALIASES -> R.string.account_aliases
+    AccountField.SHARED_ALIASES -> R.string.account_shared_aliases
+    AccountField.RECIPIENTS -> R.string.account_recipients
+    AccountField.DOMAINS -> R.string.account_domains
+    AccountField.USERNAMES -> R.string.account_usernames
+    AccountField.BANDWIDTH -> R.string.account_bandwidth
+    AccountField.FORWARDED -> R.string.account_forwarded
+    AccountField.BLOCKED -> R.string.account_blocked
+    AccountField.REPLIED -> R.string.account_replied
+}
+
+private fun featureLabel(feature: PlanFeature): Int = when (feature) {
+    PlanFeature.PHONE -> R.string.plan_feature_phone
+    PlanFeature.VPN -> R.string.plan_feature_vpn
+    PlanFeature.BUNDLE -> R.string.plan_feature_bundle
 }
 
 @Composable
@@ -229,7 +423,12 @@ private fun ConnectItem(
 
 /** The whole row is the tap target; the current choice is the supporting line, menu hangs off the arrow. */
 @Composable
-private fun ThemeItem(selected: ThemeMode, onSelect: (ThemeMode) -> Unit, modifier: Modifier = Modifier) {
+private fun ThemeItem(
+    selected: ThemeMode,
+    onSelect: (ThemeMode) -> Unit,
+    shapes: ListItemShapes,
+    modifier: Modifier = Modifier,
+) {
     var expanded by remember { mutableStateOf(false) }
 
     @Composable
@@ -244,7 +443,7 @@ private fun ThemeItem(selected: ThemeMode, onSelect: (ThemeMode) -> Unit, modifi
 
     SegmentedListItem(
         onClick = { expanded = true },
-        shapes = ListItemDefaults.segmentedShapes(index = 0, count = 1),
+        shapes = shapes,
         colors = groupedItemColors(),
         modifier = modifier,
         leadingContent = {
@@ -279,6 +478,21 @@ private fun ThemeItem(selected: ThemeMode, onSelect: (ThemeMode) -> Unit, modifi
             }
         },
         content = { Text(stringResource(R.string.theme), style = MaterialTheme.typography.titleMedium) },
+    )
+}
+
+/** On: the device's system font. Off: Compose's default typography. */
+@Composable
+private fun FontItem(systemFont: Boolean, onChange: (Boolean) -> Unit, shapes: ListItemShapes) {
+    SegmentedListItem(
+        onClick = { onChange(!systemFont) },
+        shapes = shapes,
+        colors = groupedItemColors(),
+        supportingContent = {
+            Text(stringResource(if (systemFont) R.string.font_system_on else R.string.font_system_off))
+        },
+        trailingContent = { Switch(checked = systemFont, onCheckedChange = null) },
+        content = { Text(stringResource(R.string.font_system), style = MaterialTheme.typography.titleMedium) },
     )
 }
 

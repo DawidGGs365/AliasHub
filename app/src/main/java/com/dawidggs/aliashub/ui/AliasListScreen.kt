@@ -127,6 +127,8 @@ import com.dawidggs.aliashub.UiState
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.ProviderType
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
+import androidx.compose.material3.SnackbarDuration
 
 @Composable
 fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Unit) {
@@ -155,11 +157,16 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
 
     LaunchedEffect(Unit) {
         vm.messages.collect { msg ->
-            val result = snackbar.showSnackbar(
-                message = msg.text,
-                actionLabel = if (msg.copyText != null) copy else null,
-                withDismissAction = true,
-            )
+            // A snackbar with an action never times out on its own, so every message gets the same
+            // 3 s limit here; cancelling showSnackbar takes the snackbar off the screen.
+            val result = withTimeoutOrNull(SNACKBAR_MILLIS) {
+                snackbar.showSnackbar(
+                    message = msg.text,
+                    actionLabel = if (msg.copyText != null) copy else null,
+                    withDismissAction = true,
+                    duration = SnackbarDuration.Indefinite,
+                )
+            }
             if (result == SnackbarResult.ActionPerformed && msg.copyText != null) {
                 copyToClipboard(context, msg.copyText)
             }
@@ -318,7 +325,7 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
     createFor?.let { type ->
         CreateAliasSheet(
             provider = type,
-            loadOptions = { vm.createOptions(it) },
+            loadOptions = { t, style -> vm.createOptions(t, style) },
             onDismiss = { createFor = null },
             onCreate = { provider, spec ->
                 createFor = null
@@ -737,3 +744,6 @@ private fun CardAction(
         )
     }
 }
+
+/** How long a message stays on screen. */
+private const val SNACKBAR_MILLIS = 3_000L

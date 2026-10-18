@@ -2,7 +2,11 @@ package com.dawidggs.aliashub.data
 
 import com.dawidggs.aliashub.R
 import kotlinx.coroutines.async
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import okhttp3.Request
 import org.json.JSONArray
 import org.json.JSONObject
@@ -47,16 +51,116 @@ class SimpleLoginProvider(
         return out
     }
 
-    override suspend fun createOptions(): CreateOptions = coroutineScope {
+    /**
+     * `/api/user_info` gives the plan (and trial end), `/api/stats` the totals. The free-plan alias
+     * cap is only documented for free accounts, so premium shows the plain alias count.
+     */
+    override suspend fun accountInfo(): AccountInfo = coroutineScope {
+        val infoReq = async { request("/api/user_info").send() }
+        // The stats are a bonus; a failure there must not hide the plan.
+        val statsReq = async {
+            try {
+                request("/api/stats").send()
+            } catch (e: ProviderException) {
+                if (e.kind == ProviderException.Kind.AUTH) throw e
+                null
+            }
+        }
+        val info = Http.parsing { JSONObject(infoReq.await()) }
+        val stats = statsReq.await()?.let { text -> Http.parsing { JSONObject(text) } }
+
+        val premium = info.optBoolean("is_premium", false)
+        val trial = info.optBoolean("in_trial", false)
+        val items = mutableListOf<AccountItem>()
+        info.str("email").takeIf { it.isNotBlank() }?.let { items += AccountItem.Text(AccountField.EMAIL, it) }
+        stats?.longOrNull("nb_alias")?.let { count ->
+            items += AccountItem.Count(
+                AccountField.ALIASES,
+                used = count,
+                limit = if (premium) null else info.longOrNull("max_alias_free_plan"),
+            )
+        }
+        stats?.longOrNull("nb_forward")?.let { items += AccountItem.Count(AccountField.FORWARDED, it) }
+        stats?.longOrNull("nb_block")?.let { items += AccountItem.Count(AccountField.BLOCKED, it) }
+        stats?.longOrNull("nb_reply")?.let { items += AccountItem.Count(AccountField.REPLIED, it) }
+        AccountInfo(
+            plan = AccountPlan(
+                paid = premium,
+                trial = trial,
+                endsAtMillis = if (trial) info.secondsToMillis("trial_end_timestamp") else null,
+            ),
+            items = items,
+        )
+    }
+
+    /** Account settings can only be changed one at a time from this app. */
+    private val settingsLock = Mutex()
+
+    private suspend fun readSettings(): JSONObject? = try {
+        val text = request("/api/setting").send()
+        Http.parsing { JSONObject(text) }
+    } catch (e: ProviderException) {
+        if (e.kind == ProviderException.Kind.AUTH) throw e
+        null
+    }
+
+    /**
+     * The API has no per-request choice for the suffix style or the domain of random aliases, only
+     * these account settings. So the wanted value is applied just for [block] and the previous
+     * one is put back right after, even if [block] fails. Does nothing when the value is already
+     * set or the current one is unknown (then there would be nothing to restore).
+     */
+    private suspend fun <T> withSetting(key: String, wanted: String?, current: String?, block: suspend () -> T): T {
+        if (wanted.isNullOrBlank() || current.isNullOrBlank() || wanted == current) return block()
+        return settingsLock.withLock {
+            request("/api/setting").send("PATCH", Http.jsonBody(JSONObject().put(key, wanted)))
+            try {
+                block()
+            } finally {
+                withContext(NonCancellable) {
+                    try {
+                        request("/api/setting").send("PATCH", Http.jsonBody(JSONObject().put(key, current)))
+                    } catch (e: ProviderException) {
+                        // Best effort: nothing more can be done from here.
+                    }
+                }
+            }
+        }
+    }
+
+    /** Domains random aliases can be created on. Best effort: without it the account default is used. */
+    private suspend fun randomDomains(): List<DomainOption> = try {
+        val text = request("/api/v2/setting/domains").send()
+        Http.parsing {
+            val arr = JSONArray(text)
+            List(arr.length()) { i -> arr.getJSONObject(i).str("domain") }
+                .filter { it.isNotBlank() }
+                .map { DomainOption(id = it, label = it) }
+        }
+    } catch (e: ProviderException) {
+        if (e.kind == ProviderException.Kind.AUTH) throw e
+        emptyList()
+    }
+
+    override suspend fun createOptions(suffixStyle: String?): CreateOptions = coroutineScope {
         // Independent requests, so run them side by side. The mailbox is only needed later by
         // create(), but fetching it now removes a round trip from the "Create" tap.
-        val optionsReq = async { request("/api/v5/alias/options").send() }
+        val settingsReq = async { readSettings() }
+        val domainsReq = async { randomDomains() }
         val premiumReq = async { isPremium() }
         val mailboxReq = async { prefetchMailbox() }
 
-        val root = Http.parsing { JSONObject(optionsReq.await()) }
+        val settings = settingsReq.await()
+        val currentStyle = settings?.str("random_alias_suffix")?.ifBlank { null }
+        // The suffix list depends only on the account's suffix setting, so ask for another style
+        // by switching that setting for the duration of this one call.
+        val optionsText = withSetting("random_alias_suffix", suffixStyle, currentStyle) {
+            request("/api/v5/alias/options").send()
+        }
+        val root = Http.parsing { JSONObject(optionsText) }
         val premium = premiumReq.await()
         mailboxReq.await()
+        val randomDomains = domainsReq.await()
 
         val suffixes = Http.parsing {
             val arr = root.optJSONArray("suffixes") ?: JSONArray()
@@ -72,10 +176,29 @@ class SimpleLoginProvider(
             out
         }
 
-        val random = DomainOption(RANDOM_ID, context.getString(R.string.sl_random_option))
+        val generators = buildList {
+            add(GeneratorOption(RANDOM_ID, context.getString(R.string.sl_gen_default), randomDomain = true))
+            add(GeneratorOption(MODE_WORD, context.getString(R.string.gen_random_words), randomDomain = true))
+            add(GeneratorOption(MODE_UUID, context.getString(R.string.gen_uuid), randomDomain = true))
+            if (suffixes.isNotEmpty()) {
+                add(GeneratorOption(CUSTOM_ID, context.getString(R.string.gen_custom), takesName = true))
+            }
+        }
+        val defaultDomain = settings?.str("random_alias_default_domain")?.ifBlank { null }
         CreateOptions(
-            domains = listOf(random) + suffixes,
-            defaultId = RANDOM_ID,
+            domains = suffixes,
+            defaultId = suffixes.firstOrNull()?.id,
+            generators = generators,
+            defaultGeneratorId = RANDOM_ID,
+            randomDomains = randomDomains,
+            defaultRandomDomainId = defaultDomain?.takeIf { d -> randomDomains.any { it.id == d } }
+                ?: randomDomains.firstOrNull()?.id,
+            // Only offered when the current setting is known, so it can be put back afterwards.
+            suffixStyles = if (currentStyle == null) emptyList() else listOf(
+                ChoiceOption(STYLE_WORD, context.getString(R.string.sl_suffix_word)),
+                ChoiceOption(STYLE_RANDOM, context.getString(R.string.sl_suffix_characters)),
+            ),
+            suffixStyleId = currentStyle?.let { suffixStyle ?: it },
             warning = if (root.optBoolean("can_create", true)) null
             else context.getString(R.string.sl_limit_reached),
         )
@@ -107,18 +230,31 @@ class SimpleLoginProvider(
         if (spec.note.isNotBlank()) body.put("note", spec.note)
 
         val path: String
-        if (spec.domainId == null || spec.domainId == RANDOM_ID) {
+        when (val generator = spec.generatorId) {
+            // Named by the user: needs a suffix and a mailbox.
+            CUSTOM_ID -> {
+                val prefix = spec.prefix.trim().lowercase()
+                    .ifEmpty { UUID.randomUUID().toString().replace("-", "").take(10) }
+                body.put("alias_prefix", prefix)
+                body.put("signed_suffix", spec.domainId)
+                body.put("mailbox_ids", JSONArray().put(preferredMailboxId()))
+                path = "/api/v3/alias/custom/new"
+            }
+            // Explicit mode ("word" / "uuid").
+            MODE_WORD, MODE_UUID -> path = "/api/alias/random/new?mode=$generator"
             // Uses the random-alias setting from the user's SimpleLogin account.
-            path = "/api/alias/random/new"
-        } else {
-            val prefix = spec.prefix.trim().lowercase()
-                .ifEmpty { UUID.randomUUID().toString().replace("-", "").take(10) }
-            body.put("alias_prefix", prefix)
-            body.put("signed_suffix", spec.domainId)
-            body.put("mailbox_ids", JSONArray().put(preferredMailboxId()))
-            path = "/api/v3/alias/custom/new"
+            else -> path = "/api/alias/random/new"
         }
-        val text = request(path).send("POST", Http.jsonBody(body))
+        val isRandom = spec.generatorId != CUSTOM_ID
+        val text = if (isRandom && !spec.domainId.isNullOrBlank()) {
+            // Random aliases land on the account's default random domain, so switch it for this call.
+            val current = readSettings()?.str("random_alias_default_domain")
+            withSetting("random_alias_default_domain", spec.domainId, current) {
+                request(path).send("POST", Http.jsonBody(body))
+            }
+        } else {
+            request(path).send("POST", Http.jsonBody(body))
+        }
         return Http.parsing { parse(JSONObject(text)) }
     }
 
@@ -175,5 +311,11 @@ class SimpleLoginProvider(
     private companion object {
         const val MAX_PAGES = 200
         const val RANDOM_ID = "random"
+        const val MODE_WORD = "word"
+        const val MODE_UUID = "uuid"
+        const val CUSTOM_ID = "custom"
+        /** Names of AliasSuffixEnum in the SimpleLogin API. */
+        const val STYLE_WORD = "word"
+        const val STYLE_RANDOM = "random_string"
     }
 }

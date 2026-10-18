@@ -39,7 +39,7 @@ class MainActivity : ComponentActivity() {
                 onDispose {}
             }
 
-            AliasHubTheme(mode = state.themeMode) {
+            AliasHubTheme(mode = state.themeMode, systemFont = state.systemFont) {
                 Surface(modifier = Modifier.fillMaxSize()) {
                     AliasHubApp(vm)
                 }

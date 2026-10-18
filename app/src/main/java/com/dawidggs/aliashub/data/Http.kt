@@ -113,6 +113,14 @@ internal fun JSONObject.str(name: String): String = if (isNull(name)) "" else op
 
 internal fun JSONObject.int(name: String): Int = optInt(name, 0)
 
+/** The number under [name], or null when it is absent or JSON null (unlike [int], which says 0). */
+internal fun JSONObject.longOrNull(name: String): Long? =
+    if (!has(name) || isNull(name)) null else optLong(name)
+
+/** Unix seconds (SimpleLogin) as epoch millis; null for absent, null or non-positive values. */
+internal fun JSONObject.secondsToMillis(name: String): Long? =
+    longOrNull(name)?.takeIf { it > 0 }?.times(1000)
+
 /** Accepts "2024-05-01T10:00:00Z", offsets, and Addy's "2024-05-01 10:00:00" (UTC). */
 internal fun parseMillis(raw: String?): Long? {
     if (raw.isNullOrBlank()) return null

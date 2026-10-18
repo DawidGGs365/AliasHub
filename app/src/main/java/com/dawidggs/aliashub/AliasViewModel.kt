@@ -3,6 +3,7 @@ package com.dawidggs.aliashub
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.dawidggs.aliashub.data.AccountInfo
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.CreateOptions
 import com.dawidggs.aliashub.data.CreateRequest
@@ -36,6 +37,10 @@ data class UiState(
     val initialized: Boolean = false,
     val configured: List<ProviderType> = emptyList(),
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
+    /** True: text uses the device's system font; false: Compose's own default typography. */
+    val systemFont: Boolean = true,
+    /** Plan and usage per connected provider; missing while loading or if the call failed. */
+    val accounts: Map<ProviderType, AccountInfo> = emptyMap(),
     val aliases: List<Alias> = emptyList(),
     val loading: Boolean = false,
     /** One message per provider that failed, so a broken one never hides the others. */
@@ -71,11 +76,19 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     /** In-flight list request per provider; a new refresh replaces (cancels) the old one. */
     private val loads = mutableMapOf<ProviderType, Job>()
 
+    /** Same for the account info shown on the Settings cards. */
+    private val accountLoads = mutableMapOf<ProviderType, Job>()
+
     // Not a secret, so plain preferences. It is tiny and read synchronously so the first frame
     // already has the right theme.
     private val prefs = app.getSharedPreferences("aliashub_prefs", Context.MODE_PRIVATE)
 
-    private val _state = MutableStateFlow(UiState(themeMode = loadThemeMode()))
+    private val _state = MutableStateFlow(
+        UiState(
+            themeMode = loadThemeMode(),
+            systemFont = prefs.getBoolean(KEY_SYSTEM_FONT, true),
+        ),
+    )
     val state: StateFlow<UiState> = _state.asStateFlow()
 
     private val _messages = Channel<Message>(Channel.BUFFERED)
@@ -99,6 +112,15 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     fun setThemeMode(mode: ThemeMode) {
         prefs.edit().putString(KEY_THEME, mode.name).apply()
         _state.update { it.copy(themeMode = mode) }
+    }
+
+    /** Where "Manage account" goes: the provider's dashboard (own server for self-hosted ones). */
+    fun dashboardUrl(type: ProviderType): String =
+        Providers.dashboardUrl(type, store.get(type)?.baseUrl)
+
+    fun setSystemFont(enabled: Boolean) {
+        prefs.edit().putBoolean(KEY_SYSTEM_FONT, enabled).apply()
+        _state.update { it.copy(systemFont = enabled) }
     }
 
     // ---- loading ----------------------------------------------------------------------
@@ -135,6 +157,28 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         _state.update { it.copy(loading = loads.isNotEmpty()) }
     }
 
+    /**
+     * Fetches plan and limits for every connected provider (or just [only]). Failures are ignored
+     * on purpose: this is extra information, and a real problem with the provider already shows
+     * up as the error from [refresh]. Whatever was loaded before stays on screen.
+     */
+    fun refreshAccounts(only: ProviderType? = null) {
+        val targets = if (only != null) listOf(only) else _state.value.configured
+        for (t in targets) {
+            accountLoads.remove(t)?.cancel()
+            accountLoads[t] = viewModelScope.launch {
+                val self = coroutineContext[Job]
+                try {
+                    val result = attempt { provider(t).accountInfo() }
+                    if (t !in _state.value.configured) return@launch
+                    result.onSuccess { info -> _state.update { it.copy(accounts = it.accounts + (t to info)) } }
+                } finally {
+                    if (accountLoads[t] === self) accountLoads.remove(t)
+                }
+            }
+        }
+    }
+
     // ---- provider setup -----------------------------------------------------------------
 
     /**
@@ -169,6 +213,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         providers.remove(type)
         _state.update { it.copy(configured = configured, errors = it.errors - type) }
         refresh(type)
+        refreshAccounts(type)
         return null
     }
 
@@ -177,8 +222,10 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         providers.remove(type)
         loads.remove(type)?.cancel()
         cache.remove(type)
+        accountLoads.remove(type)?.cancel()
         _state.update {
             it.copy(
+                accounts = it.accounts - type,
                 configured = store.configuredTypes(),
                 errors = it.errors - type,
                 aliases = merged(),
@@ -190,8 +237,8 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     // ---- alias actions --------------------------------------------------------------------
 
     /** Domains/suffixes the provider currently offers, or an error message. Fetched per dialog open. */
-    suspend fun createOptions(type: ProviderType): Pair<CreateOptions?, String?> {
-        val result = attempt { provider(type).createOptions() }
+    suspend fun createOptions(type: ProviderType, suffixStyle: String? = null): Pair<CreateOptions?, String?> {
+        val result = attempt { provider(type).createOptions(suffixStyle) }
         return result.getOrNull() to result.exceptionOrNull()?.let { describe(type, it) }
     }
 
@@ -301,5 +348,6 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val KEY_THEME = "theme_mode"
+        const val KEY_SYSTEM_FONT = "system_font"
     }
 }
