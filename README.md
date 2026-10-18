@@ -83,6 +83,11 @@ Your accounts remain subject to the terms and privacy policies of their respecti
 The code was written with substantial help from Claude. Although the app has been tested, it may still contain bugs or unexpected behavior.
 Found a bug or have an idea for another provider? Feel free to [open an issue](https://github.com/DawidGGs365) on GitHub. I'll do my best to investigate and fix reported problems.
 
+## Trademarks
+
+AliasHub is an independent, open-source project and is not affiliated with, endorsed by, or sponsored by SimpleLogin, Addy.io, Mozilla, or Firefox Relay.
+All third-party names and logos are the property of their respective owners and are used solely to identify the supported services. Their use does not imply any affiliation with or endorsement by those owners.
+
 ## License
 
 AliasHub is released under the [MIT License](LICENSE).
