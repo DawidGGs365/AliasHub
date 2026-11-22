@@ -443,13 +443,6 @@ private fun AliasList(
                             .animateItem()
                             .padding(start = 16.dp, top = 12.dp, bottom = 6.dp),
                     ) {
-                        Icon(
-                            painter = providerIcon(type),
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        Spacer(Modifier.width(8.dp))
                         Text(
                             type.label,
                             style = MaterialTheme.typography.titleSmall,
@@ -488,7 +481,7 @@ private fun LastSyncFooter(syncedAt: Long, modifier: Modifier = Modifier) {
     LaunchedEffect(syncedAt) {
         while (true) {
             now = System.currentTimeMillis()
-            delay(30_000)
+            delay(30_000.milliseconds)
         }
     }
     val elapsed = (now - syncedAt).coerceAtLeast(0)
