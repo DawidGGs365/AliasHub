@@ -43,10 +43,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           cp app/build/outputs/apk/release/app-release.apk AliasHub.apk
           gh release delete latest --cleanup-tag --yes || true
           gh release create latest AliasHub.apk \
             --target "$GITHUB_SHA" \
-            --title "Latest build" \
+            --title "v$VERSION" \
             --notes "Automated signed build from commit $GITHUB_SHA (run #${{ github.run_number }})." \
             --latest
