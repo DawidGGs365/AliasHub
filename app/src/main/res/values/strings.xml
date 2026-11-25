@@ -9,6 +9,11 @@
     <string name="section_all">All</string>
     <string name="empty_vault_text">No aliases yet. Tap + to create one.</string>
     <string name="empty_search_result">Nothing matches your search.</string>
+    <string name="search_type_two_letters">Type two letters to start search</string>
+    <string name="sort">Sort</string>
+    <string name="sort_default">Default</string>
+    <string name="sort_a_z">A–Z</string>
+    <string name="sort_z_a">Z–A</string>
     <string name="copied">Copied</string>
     <string name="alias">alias</string>
     <string name="provider">Provider</string>

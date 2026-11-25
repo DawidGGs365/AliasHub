@@ -17,6 +17,7 @@ import com.dawidggs.aliashub.data.ProviderException
 import com.dawidggs.aliashub.data.ProviderException.Kind
 import com.dawidggs.aliashub.data.ProviderType
 import com.dawidggs.aliashub.data.Providers
+import com.dawidggs.aliashub.data.SortOrder
 import com.dawidggs.aliashub.data.ThemeMode
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
@@ -62,6 +63,7 @@ data class UiState(
     val busy: Set<String> = emptySet(),
     val filter: ProviderType? = null,
     val query: String = "",
+    val sort: SortOrder = SortOrder.DEFAULT,
 ) {
     /**
      * The oldest successful sync among the connected providers, so one provider that keeps
@@ -70,12 +72,21 @@ data class UiState(
     val lastSyncMillis: Long?
         get() = configured.mapNotNull { syncedAt[it] }.minOrNull()
 
+    /** Filter first, then sort, so the order always applies to exactly what is shown. */
     val visible: List<Alias>
-        get() = aliases.filter { a ->
-            (filter == null || a.provider == filter) &&
-                (query.isBlank() ||
-                    a.address.contains(query, ignoreCase = true) ||
-                    a.note.contains(query, ignoreCase = true))
+        get() {
+            val matching = aliases.filter { a ->
+                (filter == null || a.provider == filter) &&
+                    (query.isBlank() ||
+                        a.address.contains(query, ignoreCase = true) ||
+                        a.note.contains(query, ignoreCase = true))
+            }
+            // sortedWith is stable, so equal addresses keep their provider order.
+            return when (sort) {
+                SortOrder.DEFAULT -> matching
+                SortOrder.A_Z -> matching.sortedWith(compareBy(String.CASE_INSENSITIVE_ORDER) { it.address })
+                SortOrder.Z_A -> matching.sortedWith(compareByDescending(String.CASE_INSENSITIVE_ORDER) { it.address })
+            }
         }
 }
 
@@ -120,6 +131,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
     private val _state = MutableStateFlow(
         UiState(
             themeMode = loadThemeMode(),
+            sort = loadSortOrder(),
             systemFont = prefs.getBoolean(KEY_SYSTEM_FONT, true),
         ),
     )
@@ -161,6 +173,16 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
         prefs.getString(KEY_THEME, null)
             ?.let { saved -> ThemeMode.entries.firstOrNull { it.name == saved } }
             ?: ThemeMode.SYSTEM
+
+    private fun loadSortOrder(): SortOrder =
+        prefs.getString(KEY_SORT, null)
+            ?.let { saved -> SortOrder.entries.firstOrNull { it.name == saved } }
+            ?: SortOrder.DEFAULT
+
+    fun setSortOrder(order: SortOrder) {
+        prefs.edit { putString(KEY_SORT, order.name) }
+        _state.update { it.copy(sort = order) }
+    }
 
     fun setThemeMode(mode: ThemeMode) {
         prefs.edit { putString(KEY_THEME, mode.name) }
@@ -475,6 +497,7 @@ class AliasViewModel(app: Application) : AndroidViewModel(app) {
 
     private companion object {
         const val KEY_THEME = "theme_mode"
+        const val KEY_SORT = "sort_order"
         const val KEY_SYSTEM_FONT = "system_font"
         const val PERSIST_DELAY_MS = 400L
     }

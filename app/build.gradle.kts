@@ -14,7 +14,7 @@ android {
         minSdk = 26
         targetSdk = 37
         versionCode = 2
-        versionName = "1.0.1"
+        versionName = "1.1.0"
     }
 
     // Release signing is configured from environment variables (set by CI from

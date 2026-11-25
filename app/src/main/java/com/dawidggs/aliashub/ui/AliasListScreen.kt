@@ -59,9 +59,12 @@ import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FloatingActionButtonMenu
 import androidx.compose.material3.FloatingActionButtonMenuItem
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItemDefaults
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SearchBarDefaults
@@ -114,12 +117,14 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.dawidggs.aliashub.AliasViewModel
 import com.dawidggs.aliashub.R
 import com.dawidggs.aliashub.UiState
 import com.dawidggs.aliashub.data.Alias
 import com.dawidggs.aliashub.data.ProviderType
+import com.dawidggs.aliashub.data.SortOrder
 import android.text.format.DateUtils
 import androidx.compose.ui.text.style.TextAlign
 import kotlinx.coroutines.delay
@@ -138,7 +143,7 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
     var deleteFor by remember { mutableStateOf<Alias?>(null) }
     var fabExpanded by rememberSaveable { mutableStateOf(false) }
     // Filtering runs once per change of inputs, not on every recomposition (and not twice).
-    val visible = remember(state.aliases, state.filter, state.query) { state.visible }
+    val visible = remember(state.aliases, state.filter, state.query, state.sort) { state.visible }
 
     val searchBarState = rememberSearchBarState()
     val textFieldState = rememberTextFieldState(state.query)
@@ -259,11 +264,16 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
         Box(Modifier.fillMaxSize()) {
             // The keyboard must not cover the note being edited on a card.
             Column(Modifier.padding(padding).consumeWindowInsets(padding).imePadding()) {
-                ProviderFilter(
-                    selected = state.filter,
-                    providers = state.configured,
-                    onSelect = vm::setFilter,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.weight(1f)) {
+                        ProviderFilter(
+                            selected = state.filter,
+                            providers = state.configured,
+                            onSelect = vm::setFilter,
+                        )
+                    }
+                    SortMenu(selected = state.sort, onSelect = vm::setSortOrder)
+                }
                 state.errors.values.forEach { ErrorBanner(it) }
 
                 PullToRefreshBox(
@@ -308,15 +318,20 @@ fun AliasListScreen(state: UiState, vm: AliasViewModel, onOpenSettings: () -> Un
 
     // Full-screen search: the results are the same grouped alias list, filtered live.
     ExpandedFullScreenSearchBar(state = searchBarState, inputField = inputField) {
-        AliasList(
-            state = state,
-            visible = visible,
-            vm = vm,
-            onDelete = { deleteFor = it },
-            contentPadding = PaddingValues(16.dp),
-            modifier = Modifier.fillMaxSize().imePadding(),
-            grouped = false,
-        )
+        // No cards until at least two characters are typed; until then show a centered hint.
+        if (state.query.trim().length < MIN_SEARCH_CHARS) {
+            SearchPrompt(Modifier.fillMaxSize().imePadding())
+        } else {
+            AliasList(
+                state = state,
+                visible = visible,
+                vm = vm,
+                onDelete = { deleteFor = it },
+                contentPadding = PaddingValues(16.dp),
+                modifier = Modifier.fillMaxSize().imePadding(),
+                grouped = false,
+            )
+        }
     }
 
     createFor?.let { type ->
@@ -356,6 +371,45 @@ internal fun providerIcon(type: ProviderType): Painter = when (type) {
     ProviderType.SIMPLELOGIN -> painterResource(R.drawable.ic_sl)
     ProviderType.ADDY -> painterResource(R.drawable.ic_addy)
     ProviderType.RELAY -> painterResource(R.drawable.ic_relay)
+}
+
+/** Sort button with a small menu; the icon is tinted while a non-default order is active. */
+@Composable
+private fun SortMenu(selected: SortOrder, onSelect: (SortOrder) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val options = listOf(
+        SortOrder.DEFAULT to stringResource(R.string.sort_default),
+        SortOrder.A_Z to stringResource(R.string.sort_a_z),
+        SortOrder.Z_A to stringResource(R.string.sort_z_a),
+    )
+    Box(Modifier.padding(end = 4.dp)) {
+        IconButton(onClick = { open = true }) {
+            Icon(
+                painter = painterResource(R.drawable.ic_sort),
+                contentDescription = stringResource(R.string.sort),
+                tint = if (selected == SortOrder.DEFAULT) LocalContentColor.current
+                else MaterialTheme.colorScheme.primary,
+            )
+        }
+        DropdownMenu(
+            expanded = open,
+            onDismissRequest = { open = false },
+            shape = RoundedCornerShape(20.dp),
+        ) {
+            options.forEach { (order, label) ->
+                DropdownMenuItem(
+                    text = { Text(label) },
+                    onClick = {
+                        open = false
+                        onSelect(order)
+                    },
+                    trailingIcon = {
+                        if (order == selected) Icon(Icons.Default.Check, contentDescription = null)
+                    },
+                )
+            }
+        }
+    }
 }
 
 /**
@@ -398,6 +452,33 @@ private fun ProviderFilter(
     }
 }
 
+/** Minimum number of typed characters before the expanded search shows any results. */
+private const val MIN_SEARCH_CHARS = 2
+
+/** Centered magnifier + hint, shown in the expanded search before enough has been typed. */
+@Composable
+private fun SearchPrompt(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier.padding(32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            Icons.Default.Search,
+            contentDescription = null,
+            modifier = Modifier.size(48.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(Modifier.size(12.dp))
+        Text(
+            text = stringResource(R.string.search_type_two_letters),
+            style = MaterialTheme.typography.bodyLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 /** The grouped alias list, used both under the app bar and inside the expanded search. */
 @Composable
 private fun AliasList(
@@ -411,6 +492,13 @@ private fun AliasList(
     grouped: Boolean = true,
 ) {
     val context = LocalContext.current
+    // Computed once per change of inputs instead of on every recomposition of the list.
+    val queryActive = state.query.isNotBlank()
+    val filter = state.filter
+    val groups: List<Pair<ProviderType?, List<Alias>>> = remember(visible, grouped, queryActive, filter) {
+        if (!grouped || queryActive || filter != null) listOf(null to visible)
+        else ProviderType.entries.map { type -> type to visible.filter { a -> a.provider == type } }
+    }
     LazyColumn(
         modifier = modifier,
         contentPadding = contentPadding,
@@ -429,14 +517,11 @@ private fun AliasList(
         // While searching or filtering to one provider, results are one plain segmented group with no
         // provider headers (a header would just repeat the selected filter).
         // Otherwise: one group per provider under its own header; empty groups are skipped.
-        val groups: List<Pair<ProviderType?, List<Alias>>> =
-            if (!grouped || state.query.isNotBlank() || state.filter != null) listOf(null to visible)
-            else ProviderType.entries.map { it to visible.filter { a -> a.provider == it } }
 
         groups.forEach { (type, group) ->
             if (group.isEmpty()) return@forEach
             if (type != null) {
-                item(key = "header-$type") {
+                item(key = "header-$type", contentType = "header") {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
@@ -451,7 +536,7 @@ private fun AliasList(
                     }
                 }
             }
-            itemsIndexed(group, key = { _, alias -> alias.key }) { index, alias ->
+            itemsIndexed(group, key = { _, alias -> alias.key }, contentType = { _, _ -> "alias" }) { index, alias ->
                 AliasCard(
                     alias = alias,
                     index = index,
@@ -469,7 +554,7 @@ private fun AliasList(
         // Only under the main list; the search results have no use for it.
         val lastSync = state.lastSyncMillis
         if (grouped && lastSync != null) {
-            item(key = "last-sync") { LastSyncFooter(lastSync, Modifier.animateItem()) }
+            item(key = "last-sync", contentType = "footer") { LastSyncFooter(lastSync, Modifier.animateItem()) }
         }
     }
 }
@@ -627,6 +712,7 @@ private fun AliasCard(
                         enabled = !busy,
                         active = editing,
                         dimWhenDisabled = false,
+                        morphs = true,
                         activeIcon = rememberVectorPainter(Icons.Default.Check),
                         activeLabel = stringResource(R.string.save_button),
                         modifier = Modifier.weight(1f),
@@ -664,7 +750,11 @@ private fun Stat(icon: Painter, text: String) {
     }
 }
 
-/** Borderless note text: reads like a muted subtitle, and has no background in either state. */
+/**
+ * Borderless note text: reads like a muted subtitle, and has no background in either state.
+ * A real text field is only composed while editing: it is far more expensive than [Text], and
+ * every card with a note would otherwise pay for it while the list scrolls.
+ */
 @Composable
 private fun NoteField(
     value: TextFieldValue,
@@ -679,16 +769,23 @@ private fun NoteField(
             .fillMaxWidth()
             .padding(vertical = 6.dp),
     ) {
+        if (!editing) {
+            Text(
+                text = value.text,
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 2,
+                overflow = TextOverflow.Clip,
+                modifier = Modifier.fillMaxWidth(),
+            )
+            return@Box
+        }
         BasicTextField(
             value = value,
             onValueChange = onValueChange,
-            enabled = editing,
-            textStyle = MaterialTheme.typography.bodyMedium.copy(
-                color = if (editing) MaterialTheme.colorScheme.onSurface
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-            ),
+            textStyle = MaterialTheme.typography.bodyMedium.copy(color = MaterialTheme.colorScheme.onSurface),
             cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-            maxLines = if (editing) 6 else 2,
+            maxLines = 6,
             keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = { onDone() }),
             modifier = Modifier
@@ -726,24 +823,42 @@ private fun CardAction(
     activeIcon: Painter = icon,
     activeLabel: String = label,
     dimWhenDisabled: Boolean = true,
+    /**
+     * Only the Edit button changes state, so only it animates. Each animate*AsState costs a state
+     * object and a coroutine, which adds up with three buttons on every card while scrolling.
+     * Must stay constant for a given call site.
+     */
+    morphs: Boolean = false,
 ) {
-    val bg by animateColorAsState(
-        if (active) MaterialTheme.colorScheme.primary else container,
-        animationSpec = tween(200),
-        label = "action-bg",
-    )
-    val fg by animateColorAsState(
-        if (active) MaterialTheme.colorScheme.onPrimary else tint,
-        animationSpec = tween(200),
-        label = "action-fg",
-    )
-    // Resting shape is a rounded square; while [active] the button morphs into a full pill and
-    // springs back to the square when it is released. Press morphing still comes from `shapes`.
-    val corner by animateDpAsState(
-        targetValue = if (active) 28.dp else 12.dp,
-        animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
-        label = "action-corner",
-    )
+    val bg: Color
+    val fg: Color
+    val corner: Dp
+    if (morphs) {
+        val animatedBg by animateColorAsState(
+            if (active) MaterialTheme.colorScheme.primary else container,
+            animationSpec = tween(200),
+            label = "action-bg",
+        )
+        val animatedFg by animateColorAsState(
+            if (active) MaterialTheme.colorScheme.onPrimary else tint,
+            animationSpec = tween(200),
+            label = "action-fg",
+        )
+        // Resting shape is a rounded square; while [active] the button morphs into a full pill and
+        // springs back to the square when it is released. Press morphing still comes from `shapes`.
+        val animatedCorner by animateDpAsState(
+            targetValue = if (active) 28.dp else 12.dp,
+            animationSpec = MaterialTheme.motionScheme.fastSpatialSpec(),
+            label = "action-corner",
+        )
+        bg = animatedBg
+        fg = animatedFg
+        corner = animatedCorner
+    } else {
+        bg = container
+        fg = tint
+        corner = 12.dp
+    }
     FilledTonalButton(
         // A busy "Edit" stays fully opaque (not dimmed) but ignores taps.
         onClick = { if (enabled) onClick() },

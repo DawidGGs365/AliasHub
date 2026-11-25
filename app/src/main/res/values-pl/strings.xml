@@ -9,6 +9,11 @@
     <string name="section_all">Wszystkie</string>
     <string name="empty_vault_text">Nie ma żadnych aliasów. Naciśnij + aby utworzyć.</string>
     <string name="empty_search_result">Nie ma takiego elementu.</string>
+    <string name="search_type_two_letters">Wpisz dwie litery, aby rozpocząć wyszukiwanie</string>
+    <string name="sort">Sortuj</string>
+    <string name="sort_default">Domyślnie</string>
+    <string name="sort_a_z">A–Z</string>
+    <string name="sort_z_a">Z–A</string>
     <string name="copied">Skopiowano</string>
     <string name="alias">alias</string>
     <string name="provider">Dostawca</string>

@@ -9,6 +9,9 @@ enum class ProviderType(val label: String) {
 /** How the app picks its colors. OLED is dark with a pure black background. */
 enum class ThemeMode { SYSTEM, LIGHT, DARK, OLED }
 
+/** Order of the alias list. DEFAULT keeps the order the providers return. */
+enum class SortOrder { DEFAULT, A_Z, Z_A }
+
 /** What the user entered for one provider. [baseUrl] is only set for self-hosted instances. */
 data class ProviderConfig(
     val token: String,
@@ -87,7 +90,7 @@ data class Alias(
     val blocked: Int,
 ) {
     /** Unique across providers (two services can reuse the same numeric id). */
-    val key: String get() = "${provider.name}:$id"
+    val key: String = "${provider.name}:$id"
 }
 
 /**
